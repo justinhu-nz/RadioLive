@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#cc3333">
+    <meta name="description" content="Simple ad-free radio player">
+    <title>RadioLive</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <div class="container">
+        <main>
+            <div class="on-air-indicator" id="on-air-indicator">
+                <span class="on-air-dot"></span>
+                <span class="on-air-text">OFF AIR</span>
+            </div>
+
+            <div class="card player-card">
+                <div class="music-note note-1">♪</div>
+                <div class="music-note note-2">♫</div>
+                <div class="music-note note-3">♪</div>
+                <div class="news-icon news-1">📻</div>
+                <div class="news-icon news-2">🎙️</div>
+                <h2 id="now-playing">Select a station<button id="refresh-bfm-btn" class="refresh-metadata-btn" style="display: none;" title="Refresh now playing">🔄</button></h2>
+
+                <div class="loading-bar" id="loading-bar" style="display: none;">
+                    <div class="loading-progress"></div>
+                </div>
+
+                <div class="stations">
+                    <button class="station-btn" data-url="https://centova.geckohost.nz/proxy/caitlinssl/stream" data-name="95bFM">
+                        <span class="station-name">95bFM</span>
+                        <span class="station-location">Auckland</span>
+                    </button>
+
+                    <button class="station-btn" data-url="https://stream-ice.radionz.co.nz/National_aac128" data-name="RNZ National">
+                        <span class="station-name">RNZ National</span>
+                        <span class="station-location">New Zealand</span>
+                    </button>
+
+                    <button class="station-btn" data-url="https://playerservices.streamtheworld.com/api/livestream-redirect/NZME_11AAC.m3u8" data-name="NewstalkZB">
+                        <span class="station-name">NewstalkZB</span>
+                        <span class="station-location">Auckland</span>
+                    </button>
+                </div>
+
+                <div class="news-section">
+                    <h3>News Bulletins</h3>
+                    <div class="news-buttons">
+                        <button class="news-btn" data-type="rnz" id="rnz-news-btn">
+                            <span class="news-name">RNZ News</span>
+                            <span class="news-time" id="rnz-news-time">Latest bulletin</span>
+                        </button>
+
+                        <button class="news-btn" data-type="newstalkzb" id="ztb-news-btn">
+                            <span class="news-name">NewstalkZB</span>
+                            <span class="news-time" id="ztb-news-time">Latest bulletin</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="play-pause-btn" class="control-btn" disabled>
+                        <span class="play-icon">▶</span>
+                        <span class="pause-icon" style="display: none;">⏸</span>
+                    </button>
+                    <div class="volume-control">
+                        <span>🔊</span>
+                        <input type="range" id="volume-slider" min="0" max="100" value="70">
+                    </div>
+                </div>
+
+                <div class="status-indicator">
+                    <span id="online-status">Online</span>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 RadioLive - No ads, just music</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
