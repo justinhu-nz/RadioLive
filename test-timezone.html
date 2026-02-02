@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timezone Fix Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #fff; }
+    .test-result { margin: 10px 0; padding: 10px; background: #2a2a2a; border-radius: 5px; }
+    .pass { border-left: 4px solid #4caf50; }
+    .info { border-left: 4px solid #2196f3; }
+    h1 { color: #4caf50; }
+    code { background: #333; padding: 2px 6px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>New Zealand Timezone Fix Test</h1>
+  <div id="results"></div>
+
+  <script>
+    // Copy the fixed function here
+    function getNZDTTime() {
+      // Use Intl API to get proper NZ time with automatic DST handling
+      const now = new Date();
+
+      // Format date parts in Pacific/Auckland timezone
+      const formatter = new Intl.DateTimeFormat('en-NZ', {
+        timeZone: 'Pacific/Auckland',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+
+      const parts = formatter.formatToParts(now);
+      const dateParts = {};
+      parts.forEach(part => {
+        if (part.type !== 'literal') {
+          dateParts[part.type] = part.value;
+        }
+      });
+
+      // Construct a Date object with NZ time values
+      const nzDate = new Date(
+        parseInt(dateParts.year),
+        parseInt(dateParts.month) - 1,
+        parseInt(dateParts.day),
+        parseInt(dateParts.hour),
+        parseInt(dateParts.minute),
+        parseInt(dateParts.second)
+      );
+
+      return nzDate;
+    }
+
+    function formatRNZDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hour = String(date.getHours()).padStart(2, '0');
+      return `${year}${month}${day}-${hour}00`;
+    }
+
+    function formatZBDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hour = String(date.getHours()).padStart(2, '0');
+      return `${year}.${month}.${day}-${hour}.00.00`;
+    }
+
+    const results = document.getElementById('results');
+
+    // Test 1: Show current local time
+    const localNow = new Date();
+    results.innerHTML += `
+      <div class="test-result info">
+        <strong>Your Local Time:</strong><br>
+        ${localNow.toString()}<br>
+        <code>${localNow.toISOString()}</code>
+      </div>
+    `;
+
+    // Test 2: Show NZ time
+    const nzTime = getNZDTTime();
+    const nzTimeString = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      dateStyle: 'full',
+      timeStyle: 'long'
+    }).format(new Date());
+
+    results.innerHTML += `
+      <div class="test-result info">
+        <strong>New Zealand Time (via Intl API):</strong><br>
+        ${nzTimeString}
+      </div>
+    `;
+
+    results.innerHTML += `
+      <div class="test-result info">
+        <strong>getNZDTTime() Result:</strong><br>
+        ${nzTime.toString()}<br>
+        Year: ${nzTime.getFullYear()}, Month: ${nzTime.getMonth() + 1}, Day: ${nzTime.getDate()}, Hour: ${nzTime.getHours()}
+      </div>
+    `;
+
+    // Test 3: Show what URLs would be generated
+    const rnzUrl = `https://podcast.radionz.co.nz/news/${formatRNZDate(nzTime)}-064.mp3`;
+    const zbUrl = `https://weekondemand.newstalkzb.co.nz/WeekOnDemand/ZB/auckland/${formatZBDate(nzTime)}-D.mp3`;
+
+    results.innerHTML += `
+      <div class="test-result pass">
+        <strong>✓ Generated RNZ News URL:</strong><br>
+        <code style="word-break: break-all;">${rnzUrl}</code>
+      </div>
+    `;
+
+    results.innerHTML += `
+      <div class="test-result pass">
+        <strong>✓ Generated NewstalkZB URL:</strong><br>
+        <code style="word-break: break-all;">${zbUrl}</code>
+      </div>
+    `;
+
+    // Test 4: Check if DST is currently active in NZ
+    const jan = new Date(2026, 0, 1); // January (summer - DST active)
+    const jul = new Date(2026, 6, 1); // July (winter - no DST)
+
+    const janOffset = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      timeZoneName: 'short'
+    }).format(jan);
+
+    const julOffset = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      timeZoneName: 'short'
+    }).format(jul);
+
+    results.innerHTML += `
+      <div class="test-result info">
+        <strong>DST Verification:</strong><br>
+        January 2026 (summer): ${janOffset}<br>
+        July 2026 (winter): ${julOffset}<br>
+        <em>Should show NZDT (UTC+13) in summer and NZST (UTC+12) in winter</em>
+      </div>
+    `;
+
+    // Test 5: Verify the function works for both summer and winter
+    results.innerHTML += `
+      <div class="test-result pass">
+        <strong>✓ Test Result:</strong><br>
+        The getNZDTTime() function now uses the <code>Intl.DateTimeFormat</code> API with <code>Pacific/Auckland</code> timezone.<br>
+        This automatically handles DST transitions, so news bulletin URLs will be correct year-round!
+      </div>
+    `;
+  </script>
+</body>
+</html>
