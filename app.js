@@ -21,14 +21,43 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Get NZDT time (UTC+13)
+// Get New Zealand time (handles both NZDT UTC+13 and NZST UTC+12 automatically)
 function getNZDTTime() {
+  // Use Intl API to get proper NZ time with automatic DST handling
   const now = new Date();
-  // Convert to NZDT (UTC+13)
-  const nzdtOffset = 13 * 60; // minutes
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const nzdtTime = new Date(utc + (nzdtOffset * 60000));
-  return nzdtTime;
+
+  // Format date parts in Pacific/Auckland timezone
+  const formatter = new Intl.DateTimeFormat('en-NZ', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(now);
+  const dateParts = {};
+  parts.forEach(part => {
+    if (part.type !== 'literal') {
+      dateParts[part.type] = part.value;
+    }
+  });
+
+  // Construct a Date object with NZ time values
+  // Note: This creates a Date in local timezone but with NZ time values
+  const nzDate = new Date(
+    parseInt(dateParts.year),
+    parseInt(dateParts.month) - 1,
+    parseInt(dateParts.day),
+    parseInt(dateParts.hour),
+    parseInt(dateParts.minute),
+    parseInt(dateParts.second)
+  );
+
+  return nzDate;
 }
 
 // Format date for RNZ: YYYYMMDD-HHMM
