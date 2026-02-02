@@ -8,6 +8,12 @@ let loadedBulletinTimes = {
 let bfmNowPlayingInterval = null;
 let lastBfmTrackInfo = null;
 
+// Memory leak prevention: Track intervals and initialization state
+let newsUpdateInterval = null;
+let isPlayerInitialized = false;
+let currentAudioListeners = [];
+let currentTestAudio = null;
+
 // Register service worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -132,10 +138,18 @@ function loadNewsBulletin(type, name) {
 
     console.log(`Trying to load ${name} bulletin for ${hour}:00 from ${url}`);
 
-    // Create temporary audio to test
-    const testAudio = new Audio(url);
+    // Clean up previous test audio if exists
+    if (currentTestAudio) {
+      currentTestAudio.pause();
+      currentTestAudio.src = '';
+      currentTestAudio = null;
+    }
 
-    testAudio.addEventListener('canplay', () => {
+    // Create temporary audio to test
+    currentTestAudio = new Audio(url);
+    const testAudio = currentTestAudio;
+
+    const canplayHandler = () => {
       console.log(`Successfully loaded ${name} ${hour}:00 bulletin`);
 
       // Update the button label to match the actual bulletin hour
@@ -150,25 +164,40 @@ function loadNewsBulletin(type, name) {
       const nowPlayingElem = document.getElementById('now-playing');
       nowPlayingElem.childNodes[0].textContent = `Playing: ${name} ${hour}:00 News`;
       document.getElementById('play-pause-btn').disabled = false;
-    });
 
-    testAudio.addEventListener('error', (e) => {
+      // Clean up test audio after successful load
+      testAudio.removeEventListener('canplay', canplayHandler);
+      testAudio.removeEventListener('error', errorHandler);
+      currentTestAudio = null;
+    };
+
+    const errorHandler = (e) => {
       console.log(`Failed to load ${name} ${hour}:00 bulletin, error:`, e);
+
+      // Clean up this test audio
+      testAudio.removeEventListener('canplay', canplayHandler);
+      testAudio.removeEventListener('error', errorHandler);
+      testAudio.pause();
+      testAudio.src = '';
 
       // Try previous hour if this is first attempt
       if (attemptHoursBack === 0) {
         console.log(`Falling back to previous hour`);
-        testAudio.remove();
+        currentTestAudio = null;
         tryLoadBulletin(1);
       } else {
         // Both failed, just try to load anyway
         console.log(`Both attempts failed, loading anyway`);
+        currentTestAudio = null;
         loadStation(url, `${name} News`);
         const nowPlayingElem = document.getElementById('now-playing');
         nowPlayingElem.childNodes[0].textContent = `Trying to load ${name} News...`;
         document.getElementById('play-pause-btn').disabled = false;
       }
-    });
+    };
+
+    testAudio.addEventListener('canplay', canplayHandler);
+    testAudio.addEventListener('error', errorHandler);
   }
 
   tryLoadBulletin(hoursBack);
@@ -176,6 +205,13 @@ function loadNewsBulletin(type, name) {
 
 // Initialize audio player
 function initializePlayer() {
+  // Prevent multiple initializations
+  if (isPlayerInitialized) {
+    console.log('Player already initialized, skipping');
+    return;
+  }
+  isPlayerInitialized = true;
+
   const stationButtons = document.querySelectorAll('.station-btn');
   const newsButtons = document.querySelectorAll('.news-btn');
   const playPauseBtn = document.getElementById('play-pause-btn');
@@ -187,8 +223,11 @@ function initializePlayer() {
 
   // Update news button times
   updateNewsButtonTimes();
-  // Refresh times every minute
-  setInterval(updateNewsButtonTimes, 60000);
+  // Refresh times every minute (clear old interval if exists)
+  if (newsUpdateInterval) {
+    clearInterval(newsUpdateInterval);
+  }
+  newsUpdateInterval = setInterval(updateNewsButtonTimes, 60000);
 
   // Refresh 95bFM metadata button
   refreshBfmBtn.addEventListener('click', () => {
@@ -293,9 +332,14 @@ function loadStation(url, name) {
   // Show loading bar
   showLoading();
 
-  // Stop current audio if playing
+  // Clean up old audio and its event listeners
   if (audio) {
     audio.pause();
+    // Remove all stored event listeners to prevent memory leaks
+    currentAudioListeners.forEach(({ event, handler }) => {
+      audio.removeEventListener(event, handler);
+    });
+    currentAudioListeners = [];
     audio = null;
   }
 
@@ -304,16 +348,18 @@ function loadStation(url, name) {
   audio.volume = document.getElementById('volume-slider').value / 100;
 
   // Auto-play when loaded
-  audio.addEventListener('canplay', () => {
+  const canplayHandler = () => {
     hideLoading();
     audio.play();
     document.querySelector('.play-icon').style.display = 'none';
     document.querySelector('.pause-icon').style.display = 'inline';
     document.getElementById('play-pause-btn').classList.add('playing');
-  });
+  };
+  audio.addEventListener('canplay', canplayHandler);
+  currentAudioListeners.push({ event: 'canplay', handler: canplayHandler });
 
   // Handle errors
-  audio.addEventListener('error', (e) => {
+  const errorHandler = (e) => {
     hideLoading();
     console.error('Audio error:', e);
     const nowPlayingElem = document.getElementById('now-playing');
@@ -328,24 +374,30 @@ function loadStation(url, name) {
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.remove('live');
     onAirText.textContent = 'OFF AIR';
-  });
+  };
+  audio.addEventListener('error', errorHandler);
+  currentAudioListeners.push({ event: 'error', handler: errorHandler });
 
   // Show loading state while waiting
-  audio.addEventListener('waiting', () => {
+  const waitingHandler = () => {
     showLoading();
-  });
+  };
+  audio.addEventListener('waiting', waitingHandler);
+  currentAudioListeners.push({ event: 'waiting', handler: waitingHandler });
 
   // Hide loading when playing
-  audio.addEventListener('playing', () => {
+  const playingHandler = () => {
     hideLoading();
     const onAirIndicator = document.getElementById('on-air-indicator');
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.add('live');
     onAirText.textContent = 'ON AIR';
-  });
+  };
+  audio.addEventListener('playing', playingHandler);
+  currentAudioListeners.push({ event: 'playing', handler: playingHandler });
 
   // Handle audio end (for bulletins)
-  audio.addEventListener('ended', () => {
+  const endedHandler = () => {
     const onAirIndicator = document.getElementById('on-air-indicator');
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.remove('live');
@@ -353,9 +405,17 @@ function loadStation(url, name) {
     document.querySelector('.play-icon').style.display = 'inline';
     document.querySelector('.pause-icon').style.display = 'none';
     document.getElementById('play-pause-btn').classList.remove('playing');
-  });
+  };
+  audio.addEventListener('ended', endedHandler);
+  currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
   currentStation = { url, name };
+
+  // Clear old 95bFM interval if it exists (prevent race condition)
+  if (bfmNowPlayingInterval) {
+    clearInterval(bfmNowPlayingInterval);
+    bfmNowPlayingInterval = null;
+  }
 
   // Start fetching 95bFM now playing if it's 95bFM
   const refreshBtn = document.getElementById('refresh-bfm-btn');
@@ -367,11 +427,6 @@ function loadStation(url, name) {
     // Show refresh button
     refreshBtn.style.display = 'inline-block';
   } else {
-    // Clear interval if switching away from 95bFM
-    if (bfmNowPlayingInterval) {
-      clearInterval(bfmNowPlayingInterval);
-      bfmNowPlayingInterval = null;
-    }
     lastBfmTrackInfo = null; // Reset track info when leaving 95bFM
     // Hide refresh button
     refreshBtn.style.display = 'none';
@@ -505,6 +560,36 @@ function updateOnlineStatus() {
 // Listen for online/offline events
 window.addEventListener('online', updateOnlineStatus);
 window.addEventListener('offline', updateOnlineStatus);
+
+// Clean up resources before page unload to prevent memory leaks
+window.addEventListener('beforeunload', () => {
+  // Clear all intervals
+  if (newsUpdateInterval) {
+    clearInterval(newsUpdateInterval);
+    newsUpdateInterval = null;
+  }
+  if (bfmNowPlayingInterval) {
+    clearInterval(bfmNowPlayingInterval);
+    bfmNowPlayingInterval = null;
+  }
+
+  // Clean up audio and its listeners
+  if (audio) {
+    audio.pause();
+    currentAudioListeners.forEach(({ event, handler }) => {
+      audio.removeEventListener(event, handler);
+    });
+    currentAudioListeners = [];
+    audio = null;
+  }
+
+  // Clean up test audio
+  if (currentTestAudio) {
+    currentTestAudio.pause();
+    currentTestAudio.src = '';
+    currentTestAudio = null;
+  }
+});
 
 // Initialize on load
 window.addEventListener('load', () => {
