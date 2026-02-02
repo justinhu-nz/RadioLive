@@ -14,6 +14,109 @@ let isPlayerInitialized = false;
 let currentAudioListeners = [];
 let currentTestAudio = null;
 
+// Debug mode flag - set to true for development debugging
+const DEBUG_MODE = false;
+
+// Helper function for debug logging
+function debug(...args) {
+  if (DEBUG_MODE) {
+    console.log(...args);
+  }
+}
+
+// Toast notification system
+let toastQueue = [];
+let activeToasts = 0;
+const MAX_TOASTS = 3;
+let bfmMetadataFailures = 0;
+
+function showToast(options) {
+  const {
+    title,
+    message,
+    type = 'info', // 'error', 'warning', 'info', 'success'
+    duration = 5000,
+    action = null, // { text: 'Retry', callback: fn }
+    icon = null
+  } = options;
+
+  // Default icons based on type
+  const icons = {
+    error: '❌',
+    warning: '⚠️',
+    info: 'ℹ️',
+    success: '✅'
+  };
+
+  const toastIcon = icon || icons[type] || icons.info;
+
+  // Create toast element
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+
+  toast.innerHTML = `
+    <div class="toast-icon">${toastIcon}</div>
+    <div class="toast-content">
+      ${title ? `<div class="toast-title">${title}</div>` : ''}
+      <div class="toast-message">${message}</div>
+    </div>
+    ${action ? `<button class="toast-action">${action.text}</button>` : ''}
+  `;
+
+  // Add action handler if provided
+  if (action) {
+    const actionBtn = toast.querySelector('.toast-action');
+    actionBtn.addEventListener('click', () => {
+      action.callback();
+      removeToast(toast);
+    });
+  }
+
+  // Add to queue if too many toasts
+  if (activeToasts >= MAX_TOASTS) {
+    toastQueue.push({ toast, duration });
+    return;
+  }
+
+  // Show toast
+  const container = document.getElementById('toast-container');
+  if (container) {
+    container.appendChild(toast);
+    activeToasts++;
+
+    // Auto-remove after duration
+    if (duration > 0) {
+      setTimeout(() => {
+        removeToast(toast);
+      }, duration);
+    }
+  }
+}
+
+function removeToast(toast) {
+  toast.classList.add('toast-out');
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.parentNode.removeChild(toast);
+      activeToasts--;
+
+      // Show next toast in queue
+      if (toastQueue.length > 0) {
+        const next = toastQueue.shift();
+        const container = document.getElementById('toast-container');
+        if (container) {
+          container.appendChild(next.toast);
+          activeToasts++;
+
+          if (next.duration > 0) {
+            setTimeout(() => removeToast(next.toast), next.duration);
+          }
+        }
+      }
+    }
+  }, 300); // Match animation duration
+}
+
 // Register service worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -22,7 +125,13 @@ if ('serviceWorker' in navigator) {
         console.log('Service Worker registered successfully:', registration.scope);
       })
       .catch((error) => {
-        console.log('Service Worker registration failed:', error);
+        console.error('Service Worker registration failed:', error);
+        showToast({
+          title: 'Offline Mode Unavailable',
+          message: 'App will work online only. Check your connection.',
+          type: 'warning',
+          duration: 8000
+        });
       });
   });
 }
@@ -106,21 +215,21 @@ function updateNewsButtonTimes() {
   const hour = now.getHours();
   const timeStr = `${String(hour).padStart(2, '0')}:00`;
 
-  console.log(`updateNewsButtonTimes called. Current hour: ${timeStr}`);
-  console.log(`Loaded bulletin times:`, loadedBulletinTimes);
+  debug(`updateNewsButtonTimes called. Current hour: ${timeStr}`);
+  debug(`Loaded bulletin times:`, loadedBulletinTimes);
 
   // Only update if no bulletin is currently loaded for that station
   if (loadedBulletinTimes.rnz === null) {
-    console.log(`Updating RNZ time to ${timeStr}`);
+    debug(`Updating RNZ time to ${timeStr}`);
     document.getElementById('rnz-news-time').textContent = `${timeStr} bulletin`;
   } else {
-    console.log(`Not updating RNZ time, bulletin loaded for ${loadedBulletinTimes.rnz}:00`);
+    debug(`Not updating RNZ time, bulletin loaded for ${loadedBulletinTimes.rnz}:00`);
   }
   if (loadedBulletinTimes.newstalkzb === null) {
-    console.log(`Updating ZB time to ${timeStr}`);
+    debug(`Updating ZB time to ${timeStr}`);
     document.getElementById('ztb-news-time').textContent = `${timeStr} bulletin`;
   } else {
-    console.log(`Not updating ZB time, bulletin loaded for ${loadedBulletinTimes.newstalkzb}:00`);
+    debug(`Not updating ZB time, bulletin loaded for ${loadedBulletinTimes.newstalkzb}:00`);
   }
 }
 
@@ -136,7 +245,7 @@ function loadNewsBulletin(type, name) {
     now.setHours(now.getHours() - attemptHoursBack);
     const hour = String(now.getHours()).padStart(2, '0');
 
-    console.log(`Trying to load ${name} bulletin for ${hour}:00 from ${url}`);
+    debug(`Trying to load ${name} bulletin for ${hour}:00 from ${url}`);
 
     // Clean up previous test audio if exists
     if (currentTestAudio) {
@@ -158,7 +267,7 @@ function loadNewsBulletin(type, name) {
 
       // Store the loaded bulletin time to prevent auto-update from overwriting it
       loadedBulletinTimes[type] = hour;
-      console.log(`Stored bulletin time for ${type}: ${hour}`);
+      debug(`Stored bulletin time for ${type}: ${hour}`);
 
       loadStation(url, `${name} ${hour}:00 News`);
       const nowPlayingElem = document.getElementById('now-playing');
@@ -172,7 +281,7 @@ function loadNewsBulletin(type, name) {
     };
 
     const errorHandler = (e) => {
-      console.log(`Failed to load ${name} ${hour}:00 bulletin, error:`, e);
+      console.error(`Failed to load ${name} ${hour}:00 bulletin, error:`, e);
 
       // Clean up this test audio
       testAudio.removeEventListener('canplay', canplayHandler);
@@ -187,12 +296,20 @@ function loadNewsBulletin(type, name) {
         tryLoadBulletin(1);
       } else {
         // Both failed, just try to load anyway
-        console.log(`Both attempts failed, loading anyway`);
+        console.error(`Both attempts failed for ${name} news`);
         currentTestAudio = null;
         loadStation(url, `${name} News`);
         const nowPlayingElem = document.getElementById('now-playing');
         nowPlayingElem.childNodes[0].textContent = `Trying to load ${name} News...`;
         document.getElementById('play-pause-btn').disabled = false;
+
+        // Show toast notification
+        showToast({
+          title: 'News Bulletin Unavailable',
+          message: `Unable to load ${name} news bulletin. The service may be temporarily down.`,
+          type: 'error',
+          duration: 7000
+        });
       }
     };
 
@@ -207,7 +324,7 @@ function loadNewsBulletin(type, name) {
 function initializePlayer() {
   // Prevent multiple initializations
   if (isPlayerInitialized) {
-    console.log('Player already initialized, skipping');
+    debug('Player already initialized, skipping');
     return;
   }
   isPlayerInitialized = true;
@@ -304,10 +421,13 @@ function initializePlayer() {
     }
   });
 
-  // Volume control
+  // Volume control with validation
   volumeSlider.addEventListener('input', (e) => {
     if (audio) {
-      audio.volume = e.target.value / 100;
+      const value = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+      audio.volume = value / 100;
+      // Update slider to validated value
+      e.target.value = value;
     }
   });
 }
@@ -370,6 +490,19 @@ function loadStation(url, name) {
     } else {
       nowPlayingElem.childNodes[0].textContent = `Error loading ${name}`;
     }
+
+    // Show toast notification with retry option
+    showToast({
+      title: 'Stream Error',
+      message: `Unable to connect to ${name}. Please try again.`,
+      type: 'error',
+      duration: 6000,
+      action: {
+        text: 'Retry',
+        callback: () => loadStation(url, name)
+      }
+    });
+
     const onAirIndicator = document.getElementById('on-air-indicator');
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.remove('live');
@@ -437,12 +570,12 @@ function loadStation(url, name) {
 async function fetch95bFMNowPlaying() {
   // Only fetch if we're currently on 95bFM
   if (!currentStation || currentStation.name !== '95bFM') {
-    console.log('Not fetching 95bFM data - not currently playing 95bFM');
+    debug('Not fetching 95bFM data - not currently playing 95bFM');
     return;
   }
 
   try {
-    console.log('Fetching 95bFM now playing...');
+    debug('Fetching 95bFM now playing...');
     // Use CORS proxy to fetch the page with longer timeout
     const proxyUrl = 'https://api.allorigins.win/raw?url=';
     const targetUrl = encodeURIComponent('https://95bfm.com/');
@@ -501,11 +634,13 @@ async function fetch95bFMNowPlaying() {
           }
           lastBfmTrackInfo = trackInfo;
           console.log('✓ Updated 95bFM track:', trackInfo);
+          // Reset failure count on success
+          bfmMetadataFailures = 0;
         }
       } else if (!trackInfo) {
-        console.log('No track info found in HTML');
+        debug('No track info found in HTML');
       } else {
-        console.log('Track info unchanged:', trackInfo);
+        debug('Track info unchanged:', trackInfo);
       }
     } catch (fetchError) {
       clearTimeout(timeoutId);
@@ -515,8 +650,20 @@ async function fetch95bFMNowPlaying() {
     // Less verbose error logging - timeouts are common with CORS proxies
     if (error.name === 'AbortError') {
       console.warn('95bFM fetch timed out (proxy may be slow)');
+      bfmMetadataFailures++;
     } else {
       console.error('Error fetching 95bFM now playing:', error);
+      bfmMetadataFailures++;
+    }
+
+    // Show toast after 3 consecutive failures
+    if (bfmMetadataFailures === 3) {
+      showToast({
+        title: '95bFM Metadata Unavailable',
+        message: 'Unable to fetch track information. The metadata service may be down.',
+        type: 'warning',
+        duration: 8000
+      });
     }
 
     // Only show fallback if we're still on 95bFM and haven't shown track info yet
@@ -545,10 +692,31 @@ function updateOnlineStatus() {
     statusElement.textContent = 'Online';
     statusElement.classList.remove('offline');
     statusIndicator.style.backgroundColor = '#e8f5e9';
+
+    // Show back online notification if there were offline toasts
+    const container = document.getElementById('toast-container');
+    if (container && container.children.length > 0) {
+      showToast({
+        title: 'Back Online',
+        message: 'Internet connection restored.',
+        type: 'success',
+        duration: 4000,
+        icon: '✅'
+      });
+    }
   } else {
     statusElement.textContent = 'Offline - Streaming unavailable';
     statusElement.classList.add('offline');
     statusIndicator.style.backgroundColor = '#ffebee';
+
+    // Show offline notification
+    showToast({
+      title: 'No Internet Connection',
+      message: 'Streaming is unavailable while offline.',
+      type: 'error',
+      duration: 0, // Keep until dismissed or back online
+      icon: '📡'
+    });
 
     // Pause audio when offline
     if (audio && !audio.paused) {
