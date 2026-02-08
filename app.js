@@ -27,6 +27,67 @@ function debug(...args) {
   }
 }
 
+function setMediaSessionMetadata(title, artist) {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: title || 'RadioLive',
+      artist: artist || 'Live Radio',
+      album: 'RadioLive',
+      artwork: [
+        { src: 'apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+        { src: 'favicon.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+  } catch (error) {
+    console.warn('MediaSession metadata failed:', error);
+  }
+}
+
+function updateMediaSessionState() {
+  if (!('mediaSession' in navigator) || !audio) return;
+  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+}
+
+function setupMediaSessionHandlers() {
+  if (!('mediaSession' in navigator)) return;
+
+  navigator.mediaSession.setActionHandler('play', () => {
+    if (audio) {
+      audio.play();
+      updateMediaSessionState();
+    }
+  });
+  navigator.mediaSession.setActionHandler('pause', () => {
+    if (audio) {
+      audio.pause();
+      updateMediaSessionState();
+    }
+  });
+  navigator.mediaSession.setActionHandler('stop', () => {
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      updateMediaSessionState();
+    }
+  });
+
+  navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+    if (!audio || !isFinite(audio.duration)) return;
+    const offset = details.seekOffset || 15;
+    audio.currentTime = Math.max(0, (audio.currentTime || 0) - offset);
+  });
+  navigator.mediaSession.setActionHandler('seekforward', (details) => {
+    if (!audio || !isFinite(audio.duration)) return;
+    const offset = details.seekOffset || 15;
+    audio.currentTime = Math.min(audio.duration, (audio.currentTime || 0) + offset);
+  });
+  navigator.mediaSession.setActionHandler('seekto', (details) => {
+    if (!audio || !isFinite(audio.duration) || details.seekTime === undefined) return;
+    audio.currentTime = Math.min(audio.duration, Math.max(0, details.seekTime));
+  });
+}
+
 function isBulletinUrl(url) {
   try {
     const parsed = new URL(url);
@@ -424,6 +485,7 @@ function initializePlayer() {
 
   // Update news button times
   updateNewsButtonTimes();
+  setupMediaSessionHandlers();
   // Refresh times every minute (clear old interval if exists)
   if (newsUpdateInterval) {
     clearInterval(newsUpdateInterval);
@@ -495,6 +557,7 @@ function initializePlayer() {
       playPauseBtn.classList.add('playing');
       onAirIndicator.classList.add('live');
       onAirText.textContent = 'ON AIR';
+      updateMediaSessionState();
     } else {
       audio.pause();
       playIcon.style.display = 'inline';
@@ -502,6 +565,7 @@ function initializePlayer() {
       playPauseBtn.classList.remove('playing');
       onAirIndicator.classList.remove('live');
       onAirText.textContent = 'OFF AIR';
+      updateMediaSessionState();
     }
   });
 
@@ -654,6 +718,7 @@ function loadStation(url, name) {
     document.querySelector('.play-icon').style.display = 'none';
     document.querySelector('.pause-icon').style.display = 'inline';
     document.getElementById('play-pause-btn').classList.add('playing');
+    updateMediaSessionState();
   };
   audio.addEventListener('canplay', canplayHandler);
   currentAudioListeners.push({ event: 'canplay', handler: canplayHandler });
@@ -687,6 +752,7 @@ function loadStation(url, name) {
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.remove('live');
     onAirText.textContent = 'OFF AIR';
+    updateMediaSessionState();
   };
   audio.addEventListener('error', errorHandler);
   currentAudioListeners.push({ event: 'error', handler: errorHandler });
@@ -705,6 +771,7 @@ function loadStation(url, name) {
     const onAirText = document.querySelector('.on-air-text');
     onAirIndicator.classList.add('live');
     onAirText.textContent = 'ON AIR';
+    updateMediaSessionState();
   };
   audio.addEventListener('playing', playingHandler);
   currentAudioListeners.push({ event: 'playing', handler: playingHandler });
@@ -718,11 +785,13 @@ function loadStation(url, name) {
     document.querySelector('.play-icon').style.display = 'inline';
     document.querySelector('.pause-icon').style.display = 'none';
     document.getElementById('play-pause-btn').classList.remove('playing');
+    updateMediaSessionState();
   };
   audio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
   currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News') };
+  setMediaSessionMetadata(name, currentStation.isBulletin ? 'News Bulletin' : 'Live Radio');
   if (updateBulletinControlsState) {
     updateBulletinControlsState();
   }
@@ -842,6 +911,7 @@ async function fetch95bFMNowPlaying() {
           }
           lastBfmTrackInfo = trackInfo;
           console.log('✓ Updated 95bFM track:', trackInfo);
+          setMediaSessionMetadata(trackInfo, '95bFM');
           // Reset failure count on success
           bfmMetadataFailures = 0;
         }
