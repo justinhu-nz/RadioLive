@@ -71,6 +71,11 @@
                         <span class="station-name">NewstalkZB</span>
                         <span class="station-location">Auckland</span>
                     </button>
+
+                    <button class="station-btn" data-url="https://play.r1.co.nz/live" data-name="Radio One 91FM">
+                        <span class="station-name">Radio One 91FM</span>
+                        <span class="station-location">Dunedin/Otago</span>
+                    </button>
                 </div>
 
                 <div class="news-section">
@@ -97,6 +102,16 @@
                         <span>🔊</span>
                         <input type="range" id="volume-slider" min="0" max="100" value="70">
                     </div>
+                </div>
+
+                <div class="bulletin-controls" id="bulletin-controls" aria-hidden="true">
+                    <button class="scrub-btn" id="skip-back-btn" title="Back 15 seconds">↺ 15s</button>
+                    <div class="scrub-bar">
+                        <span class="scrub-time" id="current-time">0:00</span>
+                        <input type="range" id="scrub-slider" min="0" max="100" value="0" step="0.5">
+                        <span class="scrub-time" id="duration-time">0:00</span>
+                    </div>
+                    <button class="scrub-btn" id="skip-forward-btn" title="Forward 15 seconds">15s ↻</button>
                 </div>
 
                 <div class="status-indicator">
