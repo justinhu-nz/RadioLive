@@ -160,6 +160,39 @@ main {
     transition: all 0.15s ease;
 }
 
+.edit-stations-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(180deg, #f0f0f0 0%, #d8d8d8 100%);
+    border: 1px solid #b8b8b8;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    color: #777;
+    line-height: 1;
+}
+
+.edit-stations-btn:hover {
+    background: linear-gradient(180deg, #f8f8f8 0%, #e0e0e0 100%);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.edit-stations-btn:active {
+    background: linear-gradient(180deg, #d0d0d0 0%, #c0c0c0 100%);
+}
+
+.edit-stations-btn.active {
+    background: linear-gradient(180deg, #5a8bc4 0%, #4070b0 100%);
+    border-color: #3a6aaa;
+    color: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
 /* iOS 3/4 style glossy overlay effect - only on hover */
 .card::before {
     content: '';
@@ -465,12 +498,27 @@ main {
     top: 10px;
     font-size: 0.9rem;
     color: #555;
-    opacity: 0.45;
+    opacity: 0;
     cursor: grab;
     -webkit-user-select: none;
     user-select: none;
     touch-action: none;
     -webkit-touch-callout: none;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.stations.editing .drag-handle {
+    opacity: 0.45;
+    pointer-events: auto;
+}
+
+.stations.editing .station-btn.active .drag-handle {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.stations.editing .station-btn {
+    cursor: grab;
 }
 
 .station-btn.dragging {
@@ -926,11 +974,7 @@ footer {
 
     #volume-slider {
         width: 130px;
-        height: 28px;
-        background-size: 100% 10px;
-        background-repeat: no-repeat;
-        background-position: center;
-        border-radius: 14px;
+        padding: 10px 0;
     }
 
     #volume-slider::-webkit-slider-thumb {

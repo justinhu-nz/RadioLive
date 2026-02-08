@@ -16,6 +16,7 @@ let currentTestAudio = null;
 let isScrubbing = false;
 let updateBulletinControlsState = null;
 let syncScrubUI = null;
+let isEditMode = false;
 
 // Debug mode flag - set to true for development debugging
 const DEBUG_MODE = false;
@@ -498,9 +499,27 @@ function initializePlayer() {
     fetch95bFMNowPlaying();
   });
 
+  // Edit mode toggle
+  const editStationsBtn = document.getElementById('edit-stations-btn');
+  if (editStationsBtn) {
+    editStationsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      isEditMode = !isEditMode;
+      editStationsBtn.classList.toggle('active', isEditMode);
+      if (stationsList) {
+        stationsList.classList.toggle('editing', isEditMode);
+      }
+      if (!isEditMode) {
+        saveStationOrder(stationsList);
+      }
+    });
+  }
+
   // Station selection
   stationButtons.forEach(button => {
     button.addEventListener('click', () => {
+      if (isEditMode) return;
       const url = button.getAttribute('data-url');
       const name = button.getAttribute('data-name');
 
@@ -724,111 +743,98 @@ function enableStationReorder(stationsList) {
   let draggedButton = null;
   let ghost = null;
   let placeholder = null;
-  let longPressTimer = null;
   let isDragging = false;
   let dragStartY = 0;
   let ghostOffsetY = 0;
   let latestClientY = 0;
   let rafPending = false;
-  const longPressDelay = 260;
-  const moveThreshold = 8;
+  const moveThreshold = 6;
+  let dragStarted = false;
   let onWindowMove = null;
   let onWindowUp = null;
 
   stationsList.querySelectorAll('.station-btn').forEach((btn) => {
     btn.setAttribute('draggable', 'false');
-    const handle = btn.querySelector('.drag-handle');
-    if (!handle) return;
-
-    handle.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
 
     // Prevent iOS text selection/callout on long-press
-    handle.addEventListener('touchstart', (e) => {
+    btn.addEventListener('touchstart', (e) => {
+      if (!isEditMode) return;
       e.preventDefault();
     }, { passive: false });
 
-    handle.addEventListener('pointerdown', (e) => {
+    btn.addEventListener('pointerdown', (e) => {
+      if (!isEditMode) return;
       e.preventDefault();
       e.stopPropagation();
       dragStartY = e.clientY;
-      longPressTimer = setTimeout(() => {
-        beginDrag(btn, e);
-      }, longPressDelay);
-    });
+      dragStarted = false;
+      draggedButton = btn;
+      latestClientY = e.clientY;
 
-    handle.addEventListener('pointermove', (e) => {
-      if (!longPressTimer || isDragging) return;
-      if (Math.abs(e.clientY - dragStartY) > moveThreshold) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    });
+      const rect = btn.getBoundingClientRect();
+      ghostOffsetY = e.clientY - rect.top;
 
-    handle.addEventListener('pointerup', () => {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-      if (isDragging) {
-        finishDrag();
-      }
-    });
+      onWindowMove = (evt) => {
+        if (!draggedButton) return;
+        evt.preventDefault();
+        latestClientY = evt.clientY;
 
-    handle.addEventListener('pointercancel', () => {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-      if (isDragging) {
-        finishDrag();
-      }
+        if (!dragStarted && Math.abs(evt.clientY - dragStartY) > moveThreshold) {
+          dragStarted = true;
+          beginDrag(btn);
+        }
+
+        if (isDragging && !rafPending) {
+          rafPending = true;
+          requestAnimationFrame(updateDrag);
+        }
+      };
+      onWindowUp = () => {
+        if (isDragging) {
+          finishDrag();
+        } else {
+          cleanupPendingDrag();
+        }
+      };
+      window.addEventListener('pointermove', onWindowMove, { passive: false });
+      window.addEventListener('pointerup', onWindowUp);
+      window.addEventListener('pointercancel', onWindowUp);
     });
   });
 
-  function beginDrag(btn, e) {
+  function cleanupPendingDrag() {
+    draggedButton = null;
+    dragStarted = false;
+    if (onWindowMove) {
+      window.removeEventListener('pointermove', onWindowMove);
+      onWindowMove = null;
+    }
+    if (onWindowUp) {
+      window.removeEventListener('pointerup', onWindowUp);
+      window.removeEventListener('pointercancel', onWindowUp);
+      onWindowUp = null;
+    }
+  }
+
+  function beginDrag(btn) {
     if (isDragging) return;
     isDragging = true;
-    draggedButton = btn;
-    longPressTimer = null;
     document.body.classList.add('reordering');
 
-    const rect = draggedButton.getBoundingClientRect();
-    ghostOffsetY = e.clientY - rect.top;
-    latestClientY = e.clientY;
+    const rect = btn.getBoundingClientRect();
 
     placeholder = document.createElement('div');
     placeholder.className = 'station-btn reorder-placeholder';
     placeholder.style.height = `${rect.height}px`;
 
-    ghost = draggedButton.cloneNode(true);
+    ghost = btn.cloneNode(true);
     ghost.classList.add('drag-ghost');
     ghost.style.width = `${rect.width}px`;
     ghost.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
 
-    draggedButton.parentNode.insertBefore(placeholder, draggedButton);
-    draggedButton.style.display = 'none';
+    btn.parentNode.insertBefore(placeholder, btn);
+    btn.style.display = 'none';
     document.body.appendChild(ghost);
-
-    onWindowMove = (evt) => {
-      if (!isDragging || !ghost) return;
-      evt.preventDefault();
-      latestClientY = evt.clientY;
-      if (!rafPending) {
-        rafPending = true;
-        requestAnimationFrame(updateDrag);
-      }
-    };
-    onWindowUp = () => {
-      if (isDragging) {
-        finishDrag();
-      }
-    };
-    window.addEventListener('pointermove', onWindowMove, { passive: false });
-    window.addEventListener('pointerup', onWindowUp);
-    window.addEventListener('pointercancel', onWindowUp);
 
     updateDrag();
   }
@@ -865,10 +871,7 @@ function enableStationReorder(stationsList) {
 
   function finishDrag() {
     isDragging = false;
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
+    dragStarted = false;
     if (onWindowMove) {
       window.removeEventListener('pointermove', onWindowMove);
       onWindowMove = null;
