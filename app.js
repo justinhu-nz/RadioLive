@@ -468,6 +468,7 @@ function initializePlayer() {
   }
   isPlayerInitialized = true;
 
+  const stationsList = document.querySelector('.stations');
   const stationButtons = document.querySelectorAll('.station-btn');
   const newsButtons = document.querySelectorAll('.news-btn');
   const playPauseBtn = document.getElementById('play-pause-btn');
@@ -526,6 +527,12 @@ function initializePlayer() {
       playPauseBtn.disabled = false;
     });
   });
+
+  // Restore saved station order before enabling drag/drop
+  if (stationsList) {
+    restoreStationOrder(stationsList);
+    enableStationReorder(stationsList);
+  }
 
   // News bulletin selection
   newsButtons.forEach(button => {
@@ -674,6 +681,214 @@ function initializePlayer() {
   // Expose for loadStation updates
   updateBulletinControlsState = updateBulletinControlsStateInternal;
   syncScrubUI = syncScrubUIInternal;
+}
+
+function restoreStationOrder(stationsList) {
+  if (!stationsList) return;
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem('stationOrderV1') || '[]');
+  } catch (e) {
+    saved = [];
+  }
+  if (!Array.isArray(saved) || saved.length === 0) return;
+
+  const buttons = Array.from(stationsList.querySelectorAll('.station-btn'));
+  const map = new Map(buttons.map(btn => [btn.getAttribute('data-url'), btn]));
+
+  saved.forEach((url) => {
+    const btn = map.get(url);
+    if (btn) {
+      stationsList.appendChild(btn);
+      map.delete(url);
+    }
+  });
+  // Append any new stations not in saved order
+  map.forEach((btn) => stationsList.appendChild(btn));
+}
+
+function saveStationOrder(stationsList) {
+  if (!stationsList) return;
+  const order = Array.from(stationsList.querySelectorAll('.station-btn'))
+    .map(btn => btn.getAttribute('data-url'))
+    .filter(Boolean);
+  try {
+    localStorage.setItem('stationOrderV1', JSON.stringify(order));
+  } catch (e) {
+    console.warn('Failed to save station order:', e);
+  }
+}
+
+function enableStationReorder(stationsList) {
+  if (!stationsList) return;
+  let draggedButton = null;
+  let ghost = null;
+  let placeholder = null;
+  let longPressTimer = null;
+  let isDragging = false;
+  let dragStartY = 0;
+  let ghostOffsetY = 0;
+  let latestClientY = 0;
+  let rafPending = false;
+  const longPressDelay = 260;
+  const moveThreshold = 8;
+  let onWindowMove = null;
+  let onWindowUp = null;
+
+  stationsList.querySelectorAll('.station-btn').forEach((btn) => {
+    btn.setAttribute('draggable', 'false');
+    const handle = btn.querySelector('.drag-handle');
+    if (!handle) return;
+
+    handle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragStartY = e.clientY;
+      longPressTimer = setTimeout(() => {
+        beginDrag(btn, e);
+      }, longPressDelay);
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+      if (!longPressTimer || isDragging) return;
+      if (Math.abs(e.clientY - dragStartY) > moveThreshold) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    });
+
+    handle.addEventListener('pointerup', () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      if (isDragging) {
+        finishDrag();
+      }
+    });
+
+    handle.addEventListener('pointercancel', () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      if (isDragging) {
+        finishDrag();
+      }
+    });
+  });
+
+  function beginDrag(btn, e) {
+    if (isDragging) return;
+    isDragging = true;
+    draggedButton = btn;
+    longPressTimer = null;
+    document.body.classList.add('reordering');
+
+    const rect = draggedButton.getBoundingClientRect();
+    ghostOffsetY = e.clientY - rect.top;
+    latestClientY = e.clientY;
+
+    placeholder = document.createElement('div');
+    placeholder.className = 'station-btn reorder-placeholder';
+    placeholder.style.height = `${rect.height}px`;
+
+    ghost = draggedButton.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
+
+    draggedButton.parentNode.insertBefore(placeholder, draggedButton);
+    draggedButton.style.display = 'none';
+    document.body.appendChild(ghost);
+
+    onWindowMove = (evt) => {
+      if (!isDragging || !ghost) return;
+      evt.preventDefault();
+      latestClientY = evt.clientY;
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(updateDrag);
+      }
+    };
+    onWindowUp = () => {
+      if (isDragging) {
+        finishDrag();
+      }
+    };
+    window.addEventListener('pointermove', onWindowMove, { passive: false });
+    window.addEventListener('pointerup', onWindowUp);
+    window.addEventListener('pointercancel', onWindowUp);
+
+    updateDrag();
+  }
+
+  function updateDrag() {
+    rafPending = false;
+    if (!ghost) return;
+
+    const listRect = stationsList.getBoundingClientRect();
+    const ghostTop = latestClientY - ghostOffsetY;
+    ghost.style.transform = `translate3d(${listRect.left}px, ${ghostTop}px, 0)`;
+
+    const items = Array.from(stationsList.querySelectorAll('.station-btn'))
+      .filter((el) => el !== placeholder && el !== draggedButton);
+
+    let insertBeforeNode = null;
+    for (const item of items) {
+      const box = item.getBoundingClientRect();
+      const midpoint = box.top + box.height / 2;
+      if (latestClientY < midpoint) {
+        insertBeforeNode = item;
+        break;
+      }
+    }
+
+    if (insertBeforeNode) {
+      if (insertBeforeNode !== placeholder) {
+        stationsList.insertBefore(placeholder, insertBeforeNode);
+      }
+    } else {
+      stationsList.appendChild(placeholder);
+    }
+  }
+
+  function finishDrag() {
+    isDragging = false;
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    if (onWindowMove) {
+      window.removeEventListener('pointermove', onWindowMove);
+      onWindowMove = null;
+    }
+    if (onWindowUp) {
+      window.removeEventListener('pointerup', onWindowUp);
+      window.removeEventListener('pointercancel', onWindowUp);
+      onWindowUp = null;
+    }
+    if (ghost) {
+      ghost.remove();
+      ghost = null;
+    }
+    if (placeholder && draggedButton) {
+      stationsList.insertBefore(draggedButton, placeholder);
+      placeholder.remove();
+      placeholder = null;
+    }
+    if (draggedButton) {
+      draggedButton.style.display = '';
+    }
+    draggedButton = null;
+    document.body.classList.remove('reordering');
+    saveStationOrder(stationsList);
+  }
 }
 
 // Show/hide loading bar
