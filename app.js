@@ -745,6 +745,11 @@ function enableStationReorder(stationsList) {
       e.stopPropagation();
     });
 
+    // Prevent iOS text selection/callout on long-press
+    handle.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+    }, { passive: false });
+
     handle.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();

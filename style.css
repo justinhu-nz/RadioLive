@@ -464,8 +464,10 @@ main {
     color: #555;
     opacity: 0.45;
     cursor: grab;
+    -webkit-user-select: none;
     user-select: none;
     touch-action: none;
+    -webkit-touch-callout: none;
 }
 
 .station-btn.dragging {
@@ -476,6 +478,8 @@ main {
 
 body.reordering {
     touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .station-btn.reorder-placeholder {
