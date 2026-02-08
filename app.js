@@ -13,6 +13,9 @@ let newsUpdateInterval = null;
 let isPlayerInitialized = false;
 let currentAudioListeners = [];
 let currentTestAudio = null;
+let isScrubbing = false;
+let updateBulletinControlsState = null;
+let syncScrubUI = null;
 
 // Debug mode flag - set to true for development debugging
 const DEBUG_MODE = false;
@@ -22,6 +25,28 @@ function debug(...args) {
   if (DEBUG_MODE) {
     console.log(...args);
   }
+}
+
+function isBulletinUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const isMp3 = parsed.pathname.endsWith('.mp3');
+    const isKnownHost = [
+      'podcast.radionz.co.nz',
+      'weekondemand.newstalkzb.co.nz'
+    ].some(host => parsed.hostname.includes(host));
+    return isMp3 || isKnownHost;
+  } catch (e) {
+    return false;
+  }
+}
+
+function formatTime(seconds) {
+  if (!isFinite(seconds) || seconds < 0) return '0:00';
+  const totalSeconds = Math.floor(seconds);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 // Toast notification system
@@ -120,7 +145,16 @@ function removeToast(toast) {
 // Register service worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    const isHttp = location.protocol === 'http:' || location.protocol === 'https:';
+    const isSecure = isSecureContext;
+    if (!isHttp || !isSecure) {
+      // Service workers are not supported for file:// or insecure contexts.
+      console.warn('Service Worker skipped: insecure or non-HTTP context');
+      return;
+    }
+
+    const swUrl = new URL('sw.js', window.location.href).toString();
+    navigator.serviceWorker.register(swUrl)
       .then((registration) => {
         console.log('Service Worker registered successfully:', registration.scope);
       })
@@ -337,6 +371,12 @@ function initializePlayer() {
   const playIcon = document.querySelector('.play-icon');
   const pauseIcon = document.querySelector('.pause-icon');
   const refreshBfmBtn = document.getElementById('refresh-bfm-btn');
+  const bulletinControls = document.getElementById('bulletin-controls');
+  const scrubSlider = document.getElementById('scrub-slider');
+  const currentTimeLabel = document.getElementById('current-time');
+  const durationTimeLabel = document.getElementById('duration-time');
+  const skipBackBtn = document.getElementById('skip-back-btn');
+  const skipForwardBtn = document.getElementById('skip-forward-btn');
 
   // Update news button times
   updateNewsButtonTimes();
@@ -429,7 +469,103 @@ function initializePlayer() {
       // Update slider to validated value
       e.target.value = value;
     }
+    updateVolumeSliderFill();
   });
+
+  function updateVolumeSliderFill() {
+    if (!volumeSlider) return;
+    const value = Math.max(0, Math.min(100, parseInt(volumeSlider.value) || 0));
+    volumeSlider.style.setProperty('--volume-fill', `${value}%`);
+  }
+  updateVolumeSliderFill();
+
+  function setBulletinControlsVisible(visible) {
+    if (!bulletinControls) return;
+    bulletinControls.classList.toggle('active', visible);
+    bulletinControls.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  function isSeekableAudio() {
+    return audio && isFinite(audio.duration) && audio.duration > 0 && audio.seekable && audio.seekable.length > 0;
+  }
+
+  function syncScrubUIInternal() {
+    if (!scrubSlider || !currentTimeLabel || !durationTimeLabel) return;
+    if (!audio) {
+      currentTimeLabel.textContent = '0:00';
+      durationTimeLabel.textContent = '0:00';
+      scrubSlider.value = 0;
+      scrubSlider.max = 100;
+      return;
+    }
+
+    const duration = isFinite(audio.duration) ? audio.duration : 0;
+    durationTimeLabel.textContent = formatTime(duration);
+    currentTimeLabel.textContent = formatTime(audio.currentTime);
+
+    if (!isScrubbing) {
+      scrubSlider.max = duration || 0;
+      scrubSlider.value = audio.currentTime || 0;
+    }
+  }
+
+  function updateBulletinControlsStateInternal() {
+    const shouldShow = currentStation && currentStation.isBulletin && isSeekableAudio();
+    setBulletinControlsVisible(shouldShow);
+    if (skipBackBtn) skipBackBtn.disabled = !shouldShow;
+    if (skipForwardBtn) skipForwardBtn.disabled = !shouldShow;
+    if (scrubSlider) scrubSlider.disabled = !shouldShow;
+    if (shouldShow) {
+      syncScrubUIInternal();
+    }
+  }
+
+  // Scrub slider interactions
+  if (scrubSlider) {
+    scrubSlider.addEventListener('input', (e) => {
+      if (!isSeekableAudio()) return;
+      isScrubbing = true;
+      const target = Math.max(0, Math.min(audio.duration || 0, parseFloat(e.target.value) || 0));
+      audio.currentTime = target;
+      syncScrubUIInternal();
+    });
+
+    scrubSlider.addEventListener('change', () => {
+      isScrubbing = false;
+      syncScrubUIInternal();
+    });
+
+    scrubSlider.addEventListener('pointerdown', () => {
+      isScrubbing = true;
+    });
+    scrubSlider.addEventListener('pointerup', () => {
+      isScrubbing = false;
+      syncScrubUIInternal();
+    });
+  }
+
+  // Skip controls
+  if (skipBackBtn) {
+    skipBackBtn.addEventListener('click', () => {
+      if (!isSeekableAudio()) return;
+      const nextTime = Math.max(0, (audio.currentTime || 0) - 15);
+      audio.currentTime = nextTime;
+      syncScrubUIInternal();
+    });
+  }
+  if (skipForwardBtn) {
+    skipForwardBtn.addEventListener('click', () => {
+      if (!isSeekableAudio()) return;
+      const duration = audio.duration || 0;
+      const nextTime = Math.min(duration, (audio.currentTime || 0) + 15);
+      audio.currentTime = nextTime;
+      syncScrubUIInternal();
+    });
+  }
+
+  // Expose for loadStation updates
+  updateBulletinControlsState = updateBulletinControlsStateInternal;
+  syncScrubUI = syncScrubUIInternal;
 }
 
 // Show/hide loading bar
@@ -542,7 +678,35 @@ function loadStation(url, name) {
   audio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
-  currentStation = { url, name };
+  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News') };
+  if (updateBulletinControlsState) {
+    updateBulletinControlsState();
+  }
+
+  // Update bulletin controls visibility on metadata/time changes
+  const metadataHandler = () => {
+    if (updateBulletinControlsState) {
+      updateBulletinControlsState();
+    }
+  };
+  audio.addEventListener('loadedmetadata', metadataHandler);
+  currentAudioListeners.push({ event: 'loadedmetadata', handler: metadataHandler });
+
+  const durationHandler = () => {
+    if (updateBulletinControlsState) {
+      updateBulletinControlsState();
+    }
+  };
+  audio.addEventListener('durationchange', durationHandler);
+  currentAudioListeners.push({ event: 'durationchange', handler: durationHandler });
+
+  const timeUpdateHandler = () => {
+    if (syncScrubUI) {
+      syncScrubUI();
+    }
+  };
+  audio.addEventListener('timeupdate', timeUpdateHandler);
+  currentAudioListeners.push({ event: 'timeupdate', handler: timeUpdateHandler });
 
   // Clear old 95bFM interval if it exists (prevent race condition)
   if (bfmNowPlayingInterval) {
