@@ -409,6 +409,9 @@ main {
     appearance: none;
     -webkit-appearance: none;
     outline: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .station-btn:last-child {
