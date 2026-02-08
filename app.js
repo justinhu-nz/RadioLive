@@ -88,6 +88,9 @@ function showToast(options) {
     ${action ? `<button class="toast-action">${action.text}</button>` : ''}
   `;
 
+  // Enable swipe-to-dismiss in any direction
+  attachToastSwipeHandlers(toast);
+
   // Add action handler if provided
   if (action) {
     const actionBtn = toast.querySelector('.toast-action');
@@ -116,6 +119,47 @@ function showToast(options) {
       }, duration);
     }
   }
+}
+
+function attachToastSwipeHandlers(toast) {
+  let startX = 0;
+  let startY = 0;
+  let isDragging = false;
+  const threshold = 45;
+
+  const onPointerDown = (e) => {
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    toast.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    toast.style.transform = `translate(${dx}px, ${dy}px)`;
+    toast.style.opacity = `${Math.max(0.2, 1 - Math.min(Math.abs(dx), Math.abs(dy)) / 120)}`;
+  };
+
+  const onPointerUp = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    toast.releasePointerCapture(e.pointerId);
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+      removeToast(toast);
+    } else {
+      toast.style.transform = '';
+      toast.style.opacity = '';
+    }
+  };
+
+  toast.addEventListener('pointerdown', onPointerDown);
+  toast.addEventListener('pointermove', onPointerMove);
+  toast.addEventListener('pointerup', onPointerUp);
+  toast.addEventListener('pointercancel', onPointerUp);
 }
 
 function removeToast(toast) {
