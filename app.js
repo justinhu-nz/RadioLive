@@ -522,6 +522,7 @@ function initializePlayer() {
       if (isEditMode) return;
       const url = button.getAttribute('data-url');
       const name = button.getAttribute('data-name');
+      const isVideo = button.getAttribute('data-type') === 'video';
 
       // Update active state
       stationButtons.forEach(btn => btn.classList.remove('active'));
@@ -533,8 +534,19 @@ function initializePlayer() {
       loadedBulletinTimes.newstalkzb = null;
       updateNewsButtonTimes();
 
+      // Show one-time data usage notice for video streams
+      if (isVideo && !localStorage.getItem('tvDataWarningShown')) {
+        localStorage.setItem('tvDataWarningShown', '1');
+        showToast({
+          title: 'Data Usage',
+          message: 'TV audio streams use more data than radio stations.',
+          type: 'info',
+          duration: 4000
+        });
+      }
+
       // Load new station
-      loadStation(url, name);
+      loadStation(url, name, { isVideo });
       // Update text while preserving the button - use firstChild to get text node
       const textNode = nowPlaying.firstChild;
       if (textNode && textNode.nodeType === Node.TEXT_NODE) {
@@ -915,23 +927,54 @@ function hideLoading() {
 }
 
 // Load and play station
-function loadStation(url, name) {
+function loadStation(url, name, options) {
   // Show loading bar
   showLoading();
 
   // Clean up old audio and its event listeners
   if (audio) {
     audio.pause();
+    if (audio._hlsInstance) {
+      audio._hlsInstance.destroy();
+      audio._hlsInstance = null;
+    }
     // Remove all stored event listeners to prevent memory leaks
     currentAudioListeners.forEach(({ event, handler }) => {
       audio.removeEventListener(event, handler);
     });
     currentAudioListeners = [];
+    audio.src = '';
     audio = null;
   }
 
-  // Create new audio element
-  audio = new Audio(url);
+  // Create new media element (video for TV streams, audio for radio)
+  const isVideo = options && options.isVideo;
+  if (isVideo) {
+    audio = document.createElement('video');
+    audio.playsInline = true;
+    audio.setAttribute('playsinline', '');
+
+    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      // Chrome, Firefox, Edge — use HLS.js with lowest quality
+      const hls = new Hls({ startLevel: 0 });
+      hls.loadSource(url);
+      hls.attachMedia(audio);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.currentLevel = 0;
+      });
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.fatal) {
+          audio.dispatchEvent(new Event('error'));
+        }
+      });
+      audio._hlsInstance = hls;
+    } else {
+      // Safari/iOS — native HLS support
+      audio.src = url;
+    }
+  } else {
+    audio = new Audio(url);
+  }
   audio.volume = document.getElementById('volume-slider').value / 100;
 
   // Auto-play when loaded
@@ -967,7 +1010,7 @@ function loadStation(url, name) {
       duration: 6000,
       action: {
         text: 'Retry',
-        callback: () => loadStation(url, name)
+        callback: () => loadStation(url, name, options)
       }
     });
 
@@ -1013,7 +1056,7 @@ function loadStation(url, name) {
   audio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
-  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News') };
+  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News'), isVideo: !!(options && options.isVideo) };
   setMediaSessionMetadata(name, currentStation.isBulletin ? 'News Bulletin' : 'Live Radio');
   if (updateBulletinControlsState) {
     updateBulletinControlsState();
@@ -1245,10 +1288,15 @@ window.addEventListener('beforeunload', () => {
   // Clean up audio and its listeners
   if (audio) {
     audio.pause();
+    if (audio._hlsInstance) {
+      audio._hlsInstance.destroy();
+      audio._hlsInstance = null;
+    }
     currentAudioListeners.forEach(({ event, handler }) => {
       audio.removeEventListener(event, handler);
     });
     currentAudioListeners = [];
+    audio.src = '';
     audio = null;
   }
 

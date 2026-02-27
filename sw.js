@@ -70,7 +70,8 @@ function isAudioStream(url) {
     'stream-ice.radionz.co.nz',       // RNZ National stream
     'playerservices.streamtheworld.com', // NewstalkZB stream
     'podcast.radionz.co.nz',          // RNZ news bulletins
-    'weekondemand.newstalkzb.co.nz'   // NewstalkZB news bulletins
+    'weekondemand.newstalkzb.co.nz',  // NewstalkZB news bulletins
+    'i.mjh.nz'                         // HLS streams (radio + TV)
   ];
   return streamHosts.some(host => url.hostname.includes(host));
 }
