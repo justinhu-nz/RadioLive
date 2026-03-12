@@ -18,6 +18,56 @@ let updateBulletinControlsState = null;
 let syncScrubUI = null;
 let isEditMode = false;
 
+// Web Audio API for volume control (works on iOS where audio.volume is read-only)
+let audioContext = null;
+let gainNode = null;
+let currentSourceNode = null;
+
+function ensureAudioContext() {
+  if (audioContext) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioContext = new AC();
+  gainNode = audioContext.createGain();
+  gainNode.connect(audioContext.destination);
+  // Set initial volume from slider
+  const slider = document.getElementById('volume-slider');
+  if (slider) {
+    gainNode.gain.value = (parseInt(slider.value) || 70) / 100;
+  }
+}
+
+function connectAudioToGain(mediaElement) {
+  if (!audioContext || !gainNode) return;
+  // Disconnect previous source if any
+  if (currentSourceNode) {
+    try { currentSourceNode.disconnect(); } catch (e) { /* already disconnected */ }
+    currentSourceNode = null;
+  }
+  // Resume context if suspended (autoplay policy)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+  try {
+    currentSourceNode = audioContext.createMediaElementSource(mediaElement);
+    currentSourceNode.connect(gainNode);
+  } catch (e) {
+    // Element may already be connected to a context; fall back to audio.volume
+    console.warn('Web Audio connect failed, falling back to audio.volume:', e);
+  }
+}
+
+function setVolume(value) {
+  const normalized = Math.max(0, Math.min(1, value));
+  if (gainNode) {
+    gainNode.gain.value = normalized;
+  }
+  if (audio) {
+    // Also set audio.volume as fallback for non-iOS
+    try { audio.volume = normalized; } catch (e) { /* read-only on iOS */ }
+  }
+}
+
 // Debug mode flag - set to true for development debugging
 const DEBUG_MODE = false;
 
@@ -607,14 +657,12 @@ function initializePlayer() {
     }
   });
 
-  // Volume control with validation
+  // Volume control with validation (uses Web Audio GainNode for iOS support)
   function handleVolumeChange(e) {
-    if (audio) {
-      const value = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
-      audio.volume = value / 100;
-      // Update slider to validated value
-      e.target.value = value;
-    }
+    ensureAudioContext();
+    const value = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+    e.target.value = value;
+    setVolume(value / 100);
     updateVolumeSliderFill();
   }
   volumeSlider.addEventListener('input', handleVolumeChange);
@@ -949,6 +997,11 @@ function loadStation(url, name, options) {
       audio._hlsInstance.destroy();
       audio._hlsInstance = null;
     }
+    // Disconnect from Web Audio graph
+    if (currentSourceNode) {
+      try { currentSourceNode.disconnect(); } catch (e) { /* ok */ }
+      currentSourceNode = null;
+    }
     // Remove all stored event listeners to prevent memory leaks
     currentAudioListeners.forEach(({ event, handler }) => {
       audio.removeEventListener(event, handler);
@@ -986,7 +1039,11 @@ function loadStation(url, name, options) {
   } else {
     audio = new Audio(url);
   }
-  audio.volume = document.getElementById('volume-slider').value / 100;
+
+  // Connect through Web Audio GainNode for iOS volume control
+  ensureAudioContext();
+  connectAudioToGain(audio);
+  setVolume(document.getElementById('volume-slider').value / 100);
 
   // Auto-play when loaded
   const canplayHandler = () => {
@@ -1303,12 +1360,23 @@ window.addEventListener('beforeunload', () => {
       audio._hlsInstance.destroy();
       audio._hlsInstance = null;
     }
+    if (currentSourceNode) {
+      try { currentSourceNode.disconnect(); } catch (e) { /* ok */ }
+      currentSourceNode = null;
+    }
     currentAudioListeners.forEach(({ event, handler }) => {
       audio.removeEventListener(event, handler);
     });
     currentAudioListeners = [];
     audio.src = '';
     audio = null;
+  }
+
+  // Clean up Web Audio context
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+    gainNode = null;
   }
 
   // Clean up test audio
