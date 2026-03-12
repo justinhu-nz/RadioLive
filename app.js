@@ -616,18 +616,7 @@ function initializePlayer() {
       e.target.value = value;
     }
     updateVolumeSliderFill();
-  }
-  volumeSlider.addEventListener('input', handleVolumeChange);
-  // 'change' fires on some mobile browsers that don't fire 'input' during drag
-  volumeSlider.addEventListener('change', handleVolumeChange);
-
-  // Prevent page scroll while dragging volume slider on mobile
-  volumeSlider.addEventListener('touchstart', (e) => {
-    e.stopPropagation();
-  }, { passive: true });
-  volumeSlider.addEventListener('touchmove', (e) => {
-    e.stopPropagation();
-  }, { passive: true });
+  });
 
   function updateVolumeSliderFill() {
     if (!volumeSlider) return;
