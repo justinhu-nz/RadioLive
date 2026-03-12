@@ -685,9 +685,18 @@ function initializePlayer() {
     }
   }
 
+  function resetPlaybackSpeed() {
+    currentSpeedIndex = 0;
+    updateSpeedButton();
+  }
+
   function updateBulletinControlsStateInternal() {
     const shouldShow = currentStation && currentStation.isBulletin && isSeekableAudio();
     setBulletinControlsVisible(shouldShow);
+    speedBtn.classList.toggle('visible', shouldShow);
+    if (!shouldShow) {
+      resetPlaybackSpeed();
+    }
     if (skipBackBtn) skipBackBtn.disabled = !shouldShow;
     if (skipForwardBtn) skipForwardBtn.disabled = !shouldShow;
     if (scrubSlider) scrubSlider.disabled = !shouldShow;
