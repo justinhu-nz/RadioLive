@@ -986,33 +986,26 @@ function loadStation(url, name, options) {
     audio = null;
   }
 
-  // Create new media element (video for TV streams, audio for radio)
-  const isVideo = options && options.isVideo;
-  if (isVideo) {
-    audio = document.createElement('video');
-    audio.playsInline = true;
-    audio.setAttribute('playsinline', '');
-
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      // Chrome, Firefox, Edge — use HLS.js with lowest quality
-      const hls = new Hls({ startLevel: 0 });
-      hls.loadSource(url);
-      hls.attachMedia(audio);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        hls.currentLevel = 0;
-      });
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          audio.dispatchEvent(new Event('error'));
-        }
-      });
-      audio._hlsInstance = hls;
-    } else {
-      // Safari/iOS — native HLS support
-      audio.src = url;
-    }
+  // Always use an Audio element — for HLS streams (e.g. TVNZ 1), use HLS.js
+  // so the browser plays audio-only and continues in the background on mobile.
+  audio = new Audio();
+  if (url.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
+    // Chrome, Firefox, Edge — use HLS.js with lowest quality
+    const hls = new Hls({ startLevel: 0 });
+    hls.loadSource(url);
+    hls.attachMedia(audio);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.currentLevel = 0;
+    });
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        audio.dispatchEvent(new Event('error'));
+      }
+    });
+    audio._hlsInstance = hls;
   } else {
-    audio = new Audio(url);
+    // Safari/iOS native HLS, or regular stream URLs
+    audio.src = url;
   }
   audio.volume = document.getElementById('volume-slider').value / 100;
   // Apply current playback speed to new audio
