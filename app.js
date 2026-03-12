@@ -608,10 +608,11 @@ function initializePlayer() {
   });
 
   // Volume control with validation
-  volumeSlider.addEventListener('input', (e) => {
+  function handleVolumeChange(e) {
     if (audio) {
       const value = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
       audio.volume = value / 100;
+      // Update slider to validated value
       e.target.value = value;
     }
     updateVolumeSliderFill();
