@@ -973,20 +973,8 @@ footer {
         font-size: 14px;
     }
 
-    #volume-slider {
-        width: 130px;
-        height: 8px;
-        padding: 12px 0;
-    }
-
-    #volume-slider::-webkit-slider-thumb {
-        width: 28px;
-        height: 28px;
-    }
-
-    #volume-slider::-moz-range-thumb {
-        width: 28px;
-        height: 28px;
+    .volume-control {
+        display: none;
     }
 }
 
