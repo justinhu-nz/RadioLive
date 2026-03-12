@@ -826,6 +826,18 @@ body.reordering {
 
 .speed-strip.visible {
     display: block;
+    animation: speed-strip-enter 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes speed-strip-enter {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* Recessed trough that contains the indicator + buttons */
@@ -838,6 +850,7 @@ body.reordering {
     border: 1px solid #1c1c1c;
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
     overflow: hidden;
+    touch-action: pan-y;
 }
 
 /* The sliding blue pill — positioned by JS */
@@ -911,6 +924,16 @@ body.reordering {
     50%  { transform: scale(1.2); }
     80%  { transform: scale(0.93); }
     100% { transform: scale(1); }
+}
+
+/* Subtle breathing pulse when speed is above 1× */
+@keyframes speed-elevated-pulse {
+    0%, 100% { filter: brightness(1); }
+    50%       { filter: brightness(1.2); }
+}
+
+.speed-indicator.elevated {
+    animation: speed-elevated-pulse 2.5s ease-in-out infinite;
 }
 
 .volume-control {
