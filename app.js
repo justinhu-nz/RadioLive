@@ -608,7 +608,7 @@ function initializePlayer() {
   });
 
   // Volume control with validation
-  volumeSlider.addEventListener('input', (e) => {
+  function handleVolumeChange(e) {
     if (audio) {
       const value = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
       audio.volume = value / 100;
@@ -616,7 +616,18 @@ function initializePlayer() {
       e.target.value = value;
     }
     updateVolumeSliderFill();
-  });
+  }
+  volumeSlider.addEventListener('input', handleVolumeChange);
+  // 'change' fires on some mobile browsers that don't fire 'input' during drag
+  volumeSlider.addEventListener('change', handleVolumeChange);
+
+  // Prevent page scroll while dragging volume slider on mobile
+  volumeSlider.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+  }, { passive: true });
+  volumeSlider.addEventListener('touchmove', (e) => {
+    e.stopPropagation();
+  }, { passive: true });
 
   function updateVolumeSliderFill() {
     if (!volumeSlider) return;
