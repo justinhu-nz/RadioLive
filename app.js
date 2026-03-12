@@ -17,6 +17,7 @@ let isScrubbing = false;
 let updateBulletinControlsState = null;
 let syncScrubUI = null;
 let isEditMode = false;
+let currentSpeed = 1;
 
 // Debug mode flag - set to true for development debugging
 const DEBUG_MODE = false;
@@ -484,24 +485,27 @@ function initializePlayer() {
   const durationTimeLabel = document.getElementById('duration-time');
   const skipBackBtn = document.getElementById('skip-back-btn');
   const skipForwardBtn = document.getElementById('skip-forward-btn');
-  const speedBtn = document.getElementById('speed-btn');
+  const speedStrip = document.getElementById('speed-strip');
+  const speedOptions = speedStrip ? Array.from(speedStrip.querySelectorAll('.speed-option')) : [];
 
   // Playback speed control
-  const playbackSpeeds = [1, 1.25, 1.5, 1.75, 2];
-  let currentSpeedIndex = 0;
-
-  function updateSpeedButton() {
-    const speed = playbackSpeeds[currentSpeedIndex];
-    speedBtn.textContent = speed === 1 ? '1x' : speed + 'x';
-    speedBtn.classList.toggle('speed-active', speed !== 1);
+  function setPlaybackSpeed(speed) {
+    currentSpeed = speed;
+    speedOptions.forEach(opt => {
+      opt.classList.toggle('active', parseFloat(opt.dataset.speed) === speed);
+    });
     if (audio) {
       audio.playbackRate = speed;
     }
+    if (navigator.vibrate) {
+      navigator.vibrate(8);
+    }
   }
 
-  speedBtn.addEventListener('click', () => {
-    currentSpeedIndex = (currentSpeedIndex + 1) % playbackSpeeds.length;
-    updateSpeedButton();
+  speedOptions.forEach(opt => {
+    opt.addEventListener('click', () => {
+      setPlaybackSpeed(parseFloat(opt.dataset.speed));
+    });
   });
 
   // Update news button times
@@ -686,14 +690,13 @@ function initializePlayer() {
   }
 
   function resetPlaybackSpeed() {
-    currentSpeedIndex = 0;
-    updateSpeedButton();
+    setPlaybackSpeed(1);
   }
 
   function updateBulletinControlsStateInternal() {
     const shouldShow = currentStation && currentStation.isBulletin && isSeekableAudio();
     setBulletinControlsVisible(shouldShow);
-    speedBtn.classList.toggle('visible', shouldShow);
+    if (speedStrip) speedStrip.classList.toggle('visible', shouldShow);
     if (!shouldShow) {
       resetPlaybackSpeed();
     }
@@ -1009,10 +1012,7 @@ function loadStation(url, name, options) {
   }
   audio.volume = document.getElementById('volume-slider').value / 100;
   // Apply current playback speed to new audio
-  const speedBtnEl = document.getElementById('speed-btn');
-  if (speedBtnEl) {
-    audio.playbackRate = parseFloat(speedBtnEl.textContent) || 1;
-  }
+  audio.playbackRate = currentSpeed || 1;
 
   // Auto-play when loaded
   const canplayHandler = () => {

@@ -817,46 +817,74 @@ body.reordering {
     }
 }
 
-.speed-btn {
+/* Speed Strip — segmented speed selector shown during bulletin playback */
+.speed-strip {
     display: none;
-    background: linear-gradient(180deg, #8a8a8a 0%, #6a6a6a 100%);
-    border: 1px solid #4a4a4a;
-    border-radius: 10px;
-    padding: 4px 10px;
-    color: #f0f0f0;
-    font-size: 0.75rem;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 4px;
+    padding: 0 10px 8px;
+    background: linear-gradient(180deg, #4a4a4a 0%, #383838 100%);
+}
+
+.speed-strip.visible {
+    display: flex;
+}
+
+.speed-option {
+    position: relative;
+    flex: 1;
+    background: linear-gradient(180deg, #6a6a6a 0%, #555555 100%);
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    padding: 8px 2px;
+    min-height: 36px;
+    color: #b0b0b0;
+    font-size: 0.72rem;
     font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
-    white-space: nowrap;
     letter-spacing: -0.3px;
-    min-width: 40px;
     text-align: center;
+    cursor: pointer;
     font-family: Helvetica, 'Helvetica Neue', Arial, sans-serif;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    white-space: nowrap;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
-.speed-btn:hover {
-    background: linear-gradient(180deg, #9a9a9a 0%, #7a7a7a 100%);
-    transform: scale(1.05);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+.speed-option:hover {
+    background: linear-gradient(180deg, #7a7a7a 0%, #656565 100%);
+    color: #d0d0d0;
 }
 
-.speed-btn:active {
-    background: linear-gradient(180deg, #6a6a6a 0%, #5a5a5a 100%);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
-    transform: scale(0.95);
+.speed-option:active {
+    transform: scale(0.94);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-.speed-btn.visible {
-    display: inline-block;
-}
-
-.speed-btn.speed-active {
+.speed-option.active {
     background: linear-gradient(180deg, #5a8bc4 0%, #4070b0 100%);
     border-color: #3a6aaa;
+    color: #ffffff;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* iOS-style glossy highlight on active option */
+.speed-option.active::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    right: 2px;
+    height: 45%;
+    background: linear-gradient(180deg,
+        rgba(255, 255, 255, 0.25) 0%,
+        rgba(255, 255, 255, 0) 100%);
+    border-radius: 6px 6px 0 0;
+    pointer-events: none;
 }
 
 .volume-control {
@@ -1019,10 +1047,10 @@ footer {
         display: none;
     }
 
-    .speed-btn {
-        padding: 6px 12px;
-        font-size: 0.8rem;
-        min-width: 44px;
+    .speed-option {
+        min-height: 44px;
+        font-size: 0.75rem;
+        padding: 10px 2px;
     }
 }
 
