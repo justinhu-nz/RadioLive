@@ -486,7 +486,23 @@ function initializePlayer() {
   const skipBackBtn = document.getElementById('skip-back-btn');
   const skipForwardBtn = document.getElementById('skip-forward-btn');
   const speedStrip = document.getElementById('speed-strip');
+  const speedTrack = speedStrip ? speedStrip.querySelector('.speed-track') : null;
+  const speedIndicator = document.getElementById('speed-indicator');
   const speedOptions = speedStrip ? Array.from(speedStrip.querySelectorAll('.speed-option')) : [];
+
+  // Position the sliding indicator behind the active option
+  function positionIndicator(animate) {
+    if (!speedTrack || !speedIndicator) return;
+    const activeOpt = speedOptions.find(opt => parseFloat(opt.dataset.speed) === currentSpeed);
+    if (!activeOpt) return;
+    const trackRect = speedTrack.getBoundingClientRect();
+    const optRect = activeOpt.getBoundingClientRect();
+    if (trackRect.width === 0) return;
+    if (!animate) speedIndicator.style.transition = 'none';
+    speedIndicator.style.left = `${optRect.left - trackRect.left}px`;
+    speedIndicator.style.width = `${optRect.width}px`;
+    if (!animate) requestAnimationFrame(() => { speedIndicator.style.transition = ''; });
+  }
 
   // Playback speed control
   function setPlaybackSpeed(speed) {
@@ -494,12 +510,9 @@ function initializePlayer() {
     speedOptions.forEach(opt => {
       opt.classList.toggle('active', parseFloat(opt.dataset.speed) === speed);
     });
-    if (audio) {
-      audio.playbackRate = speed;
-    }
-    if (navigator.vibrate) {
-      navigator.vibrate(8);
-    }
+    if (audio) audio.playbackRate = speed;
+    if (navigator.vibrate) navigator.vibrate(8);
+    positionIndicator(true);
   }
 
   speedOptions.forEach(opt => {
@@ -697,6 +710,10 @@ function initializePlayer() {
     const shouldShow = currentStation && currentStation.isBulletin && isSeekableAudio();
     setBulletinControlsVisible(shouldShow);
     if (speedStrip) speedStrip.classList.toggle('visible', shouldShow);
+    if (shouldShow) {
+      // Double rAF: ensure display:block has been laid out before measuring
+      requestAnimationFrame(() => requestAnimationFrame(() => positionIndicator(false)));
+    }
     if (!shouldShow) {
       resetPlaybackSpeed();
     }
