@@ -513,6 +513,7 @@ function initializePlayer() {
     if (audio) audio.playbackRate = speed;
     if (navigator.vibrate) navigator.vibrate(8);
     positionIndicator(true);
+    if (speedIndicator) speedIndicator.classList.toggle('elevated', speed > 1);
   }
 
   speedOptions.forEach(opt => {
@@ -520,6 +521,65 @@ function initializePlayer() {
       setPlaybackSpeed(parseFloat(opt.dataset.speed));
     });
   });
+
+  // Drag-to-slide gesture on speed track
+  if (speedTrack) {
+    let dragState = null;
+
+    function computeZones() {
+      return speedOptions.map(opt => {
+        const r = opt.getBoundingClientRect();
+        return { left: r.left, right: r.right, speed: parseFloat(opt.dataset.speed) };
+      });
+    }
+
+    function zoneAtX(zones, clientX) {
+      if (clientX <= zones[0].right) return zones[0];
+      if (clientX >= zones[zones.length - 1].left) return zones[zones.length - 1];
+      return zones.find(z => clientX >= z.left && clientX < z.right) || zones[0];
+    }
+
+    speedTrack.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      speedTrack.setPointerCapture(e.pointerId);
+      dragState = { pointerId: e.pointerId, startX: e.clientX, moved: false, zones: computeZones() };
+    });
+
+    speedTrack.addEventListener('pointermove', (e) => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      if (!dragState.moved && Math.abs(e.clientX - dragState.startX) < 4) return;
+      dragState.moved = true;
+      const zone = zoneAtX(dragState.zones, e.clientX);
+      speedOptions.forEach(opt => opt.classList.toggle('active', parseFloat(opt.dataset.speed) === zone.speed));
+      const matchOpt = speedOptions.find(opt => parseFloat(opt.dataset.speed) === zone.speed);
+      if (matchOpt && speedTrack) {
+        const tr = speedTrack.getBoundingClientRect();
+        const or = matchOpt.getBoundingClientRect();
+        speedIndicator.style.transition = 'none';
+        speedIndicator.style.left = `${or.left - tr.left}px`;
+        speedIndicator.style.width = `${or.width}px`;
+      }
+    });
+
+    speedTrack.addEventListener('pointerup', (e) => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      const wasDrag = dragState.moved;
+      dragState = null;
+      if (wasDrag) {
+        speedIndicator.style.transition = '';
+        const activeOpt = speedOptions.find(opt => opt.classList.contains('active'));
+        setPlaybackSpeed(activeOpt ? parseFloat(activeOpt.dataset.speed) : 1);
+      }
+    });
+
+    speedTrack.addEventListener('pointercancel', (e) => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      dragState = null;
+      speedIndicator.style.transition = '';
+      positionIndicator(true);
+      speedOptions.forEach(opt => opt.classList.toggle('active', parseFloat(opt.dataset.speed) === currentSpeed));
+    });
+  }
 
   // Update news button times
   updateNewsButtonTimes();
