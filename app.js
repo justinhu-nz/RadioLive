@@ -484,6 +484,25 @@ function initializePlayer() {
   const durationTimeLabel = document.getElementById('duration-time');
   const skipBackBtn = document.getElementById('skip-back-btn');
   const skipForwardBtn = document.getElementById('skip-forward-btn');
+  const speedBtn = document.getElementById('speed-btn');
+
+  // Playback speed control
+  const playbackSpeeds = [1, 1.25, 1.5, 1.75, 2];
+  let currentSpeedIndex = 0;
+
+  function updateSpeedButton() {
+    const speed = playbackSpeeds[currentSpeedIndex];
+    speedBtn.textContent = speed === 1 ? '1x' : speed + 'x';
+    speedBtn.classList.toggle('speed-active', speed !== 1);
+    if (audio) {
+      audio.playbackRate = speed;
+    }
+  }
+
+  speedBtn.addEventListener('click', () => {
+    currentSpeedIndex = (currentSpeedIndex + 1) % playbackSpeeds.length;
+    updateSpeedButton();
+  });
 
   // Update news button times
   updateNewsButtonTimes();
@@ -987,6 +1006,11 @@ function loadStation(url, name, options) {
     audio = new Audio(url);
   }
   audio.volume = document.getElementById('volume-slider').value / 100;
+  // Apply current playback speed to new audio
+  const speedBtnEl = document.getElementById('speed-btn');
+  if (speedBtnEl) {
+    audio.playbackRate = parseFloat(speedBtnEl.textContent) || 1;
+  }
 
   // Auto-play when loaded
   const canplayHandler = () => {
