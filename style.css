@@ -413,46 +413,6 @@ main {
     }
 }
 
-/* Preroll ad skip indicator */
-.preroll-skip-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 8px 16px;
-    margin-bottom: 10px;
-    background: linear-gradient(180deg, #4a4a4a 0%, #333 100%);
-    border-radius: 8px;
-    border: 1px solid #555;
-    color: #ffa500;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    animation: preroll-pulse 1.5s ease-in-out infinite;
-}
-
-.preroll-skip-text {
-    color: #ffa500;
-}
-
-.preroll-skip-dots::after {
-    content: '';
-    animation: preroll-dots 1.5s steps(4, end) infinite;
-}
-
-@keyframes preroll-pulse {
-    0%, 100% { opacity: 0.8; }
-    50% { opacity: 1; }
-}
-
-@keyframes preroll-dots {
-    0% { content: ''; }
-    25% { content: '.'; }
-    50% { content: '..'; }
-    75% { content: '...'; }
-}
-
 .stations {
     display: flex;
     flex-direction: column;
