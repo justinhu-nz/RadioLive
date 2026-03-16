@@ -52,15 +52,10 @@ function hidePrerollSkipIndicator() {
   if (indicator) indicator.style.display = 'none';
 }
 
-function updatePrerollCountdown(seconds) {
-  const el = document.getElementById('preroll-countdown');
-  if (el) el.textContent = Math.ceil(seconds) + 's';
-}
 
 function cleanupPrerollSkip() {
   if (prerollSkipState) {
     if (prerollSkipState.timeout) clearTimeout(prerollSkipState.timeout);
-    if (prerollSkipState.interval) clearInterval(prerollSkipState.interval);
     prerollSkipState = null;
   }
   hidePrerollSkipIndicator();
@@ -167,19 +162,6 @@ function initPrerollSkip(audioElement, hlsInstance, stationName) {
     }, (PREROLL_FALLBACK_DURATION + 5) * 1000);
   }
 
-  // Countdown timer update
-  prerollSkipState.interval = setInterval(() => {
-    if (!prerollSkipState || !prerollSkipState.active) return;
-
-    const elapsed = (Date.now() - prerollSkipState.startTime) / 1000;
-    const target = prerollSkipState.prerollDuration || PREROLL_FALLBACK_DURATION;
-    const remaining = Math.max(0, target - elapsed);
-    updatePrerollCountdown(remaining);
-
-    if (remaining <= 0) {
-      clearInterval(prerollSkipState.interval);
-    }
-  }, 500);
 }
 
 function scheduleUnmute(audioElement, duration) {
