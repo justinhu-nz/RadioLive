@@ -441,12 +441,6 @@ main {
     animation: preroll-dots 1.5s steps(4, end) infinite;
 }
 
-.preroll-countdown {
-    color: #ccc;
-    font-size: 0.75rem;
-    font-variant-numeric: tabular-nums;
-}
-
 @keyframes preroll-pulse {
     0%, 100% { opacity: 0.8; }
     50% { opacity: 1; }
