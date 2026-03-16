@@ -1375,7 +1375,7 @@ function loadStation(url, name, options) {
   audio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
-  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News'), isVideo: !!(options && options.isVideo) };
+  currentStation = { url, name, isBulletin: isBulletinUrl(url), isVideo: !!(options && options.isVideo) };
   setMediaSessionMetadata(name, currentStation.isBulletin ? 'News Bulletin' : 'Live Radio');
   if (updateBulletinControlsState) {
     updateBulletinControlsState();
