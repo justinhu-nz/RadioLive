@@ -32,43 +32,35 @@ function debug(...args) {
 
 // NZME preroll ad detection and skipping
 // NZME streams (NewstalkZB, ZM) via StreamTheWorld inject ~28-32s preroll ads
-// as initial HLS segments before the live stream begins.
+// as initial HLS segments before the live stream begins. The preroll segments
+// are separated from live content by an HLS #EXT-X-DISCONTINUITY tag, which
+// changes the continuity counter (cc) on fragments.
 const NZME_STATIONS = ['NewstalkZB', 'ZM'];
-const PREROLL_MAX_DURATION = 35; // Maximum expected preroll duration in seconds
-const AD_URL_PATTERNS = [
-  'adswizz', 'tritondigital', '/ads/', '/ad/', 'doubleclick',
-  'googlesyndication', 'adserver', 'adsrvr', 'advertising'
-];
+const PREROLL_FALLBACK_DURATION = 33; // Fallback mute duration if detection fails
 
 function isNZMEStation(name) {
   return NZME_STATIONS.includes(name);
 }
 
-function isAdFragment(fragmentUrl) {
-  if (!fragmentUrl) return false;
-  const lower = fragmentUrl.toLowerCase();
-  return AD_URL_PATTERNS.some(pattern => lower.includes(pattern));
-}
-
 function showPrerollSkipIndicator() {
   const indicator = document.getElementById('preroll-skip-indicator');
-  if (indicator) {
-    indicator.style.display = 'flex';
-  }
+  if (indicator) indicator.style.display = 'flex';
 }
 
 function hidePrerollSkipIndicator() {
   const indicator = document.getElementById('preroll-skip-indicator');
-  if (indicator) {
-    indicator.style.display = 'none';
-  }
+  if (indicator) indicator.style.display = 'none';
+}
+
+function updatePrerollCountdown(seconds) {
+  const el = document.getElementById('preroll-countdown');
+  if (el) el.textContent = Math.ceil(seconds) + 's';
 }
 
 function cleanupPrerollSkip() {
   if (prerollSkipState) {
-    if (prerollSkipState.timeout) {
-      clearTimeout(prerollSkipState.timeout);
-    }
+    if (prerollSkipState.timeout) clearTimeout(prerollSkipState.timeout);
+    if (prerollSkipState.interval) clearInterval(prerollSkipState.interval);
     prerollSkipState = null;
   }
   hidePrerollSkipIndicator();
@@ -76,162 +68,161 @@ function cleanupPrerollSkip() {
 
 function initPrerollSkip(audioElement, hlsInstance, stationName) {
   cleanupPrerollSkip();
-
   if (!isNZMEStation(stationName)) return;
 
   debug('Preroll skip: Initializing for', stationName);
 
-  const userVolume = document.getElementById('volume-slider').value / 100;
   prerollSkipState = {
     active: true,
-    muted: true,
-    userVolume: userVolume,
     startTime: Date.now(),
-    adFragmentsSeen: false,
-    liveFragmentSeen: false,
-    firstFragmentUrl: null,
-    timeout: null
+    prerollDuration: null,   // Calculated from manifest, or fallback
+    detectedViaManifest: false,
+    timeout: null,
+    interval: null
   };
 
-  // Mute audio during preroll
+  // Mute audio immediately
   audioElement.volume = 0;
   showPrerollSkipIndicator();
+  updatePrerollCountdown(PREROLL_FALLBACK_DURATION);
 
   if (hlsInstance) {
-    // HLS.js path: inspect fragment URLs to detect ad vs live content
-    hlsInstance.on(Hls.Events.FRAG_LOADED, function onFragLoaded(event, data) {
-      if (!prerollSkipState || !prerollSkipState.active) return;
+    // === PRIMARY DETECTION: Parse the HLS manifest for discontinuity ===
+    // On LEVEL_LOADED, HLS.js gives us parsed fragment data. If the playlist
+    // contains a discontinuity (cc value changes), the fragments before it
+    // are the preroll ad. We sum their durations to get the exact preroll length.
+    let manifestParsed = false;
 
-      const fragUrl = data.frag.url || '';
-      debug('Preroll skip: Fragment loaded:', fragUrl.substring(0, 80));
+    hlsInstance.on(Hls.Events.LEVEL_LOADED, function onLevelLoaded(event, data) {
+      if (!prerollSkipState || !prerollSkipState.active || manifestParsed) return;
 
-      // Track the first fragment URL to establish the "ad" CDN baseline
-      if (!prerollSkipState.firstFragmentUrl) {
-        prerollSkipState.firstFragmentUrl = fragUrl;
+      const fragments = data.details && data.details.fragments;
+      if (!fragments || fragments.length === 0) return;
+
+      manifestParsed = true;
+      const firstCC = fragments[0].cc;
+      let prerollDuration = 0;
+      let discontinuityFound = false;
+
+      for (let i = 0; i < fragments.length; i++) {
+        if (fragments[i].cc !== firstCC) {
+          discontinuityFound = true;
+          debug('Preroll skip: Discontinuity at fragment', i,
+            '| Preroll duration:', prerollDuration.toFixed(1) + 's',
+            '| cc:', firstCC, '->', fragments[i].cc);
+          break;
+        }
+        prerollDuration += fragments[i].duration;
       }
 
-      if (isAdFragment(fragUrl)) {
-        prerollSkipState.adFragmentsSeen = true;
-        debug('Preroll skip: Ad fragment detected');
-      }
-
-      // Detect transition: if we've seen the stream for a bit, check for
-      // discontinuity or CDN domain change indicating live content
-      const fragHost = getHostFromUrl(fragUrl);
-      const firstHost = getHostFromUrl(prerollSkipState.firstFragmentUrl);
-
-      // If the host changed after seeing fragments, the preroll is over
-      if (prerollSkipState.firstFragmentUrl && fragHost !== firstHost) {
-        debug('Preroll skip: CDN switch detected, preroll complete');
-        finishPrerollSkip(audioElement);
-        return;
+      if (discontinuityFound && prerollDuration > 0 && prerollDuration < 60) {
+        // We know the exact preroll duration from the manifest
+        prerollSkipState.prerollDuration = prerollDuration;
+        prerollSkipState.detectedViaManifest = true;
+        debug('Preroll skip: Exact preroll duration =', prerollDuration.toFixed(1) + 's');
+        scheduleUnmute(audioElement, prerollDuration);
+      } else if (!discontinuityFound) {
+        // No discontinuity found — might not have a preroll ad this time
+        debug('Preroll skip: No discontinuity in manifest, no preroll detected');
+        finishPrerollSkip(audioElement, false);
       }
     });
 
-    // Discontinuity detection — the boundary between preroll and live
-    // Track the continuity counter (cc) to detect when we cross a discontinuity
-    let firstFragCC = null;
+    // === SECONDARY DETECTION: Track fragment playback cc changes ===
+    // Even if manifest parsing misses the discontinuity (e.g. playlist rotated),
+    // we can detect it in real-time as fragments change during playback.
+    let playbackFirstCC = null;
+
     hlsInstance.on(Hls.Events.FRAG_CHANGED, function onFragChanged(event, data) {
       if (!prerollSkipState || !prerollSkipState.active) return;
 
       const frag = data.frag;
-      if (firstFragCC === null && frag.cc !== undefined) {
-        firstFragCC = frag.cc;
-        debug('Preroll skip: First fragment cc =', firstFragCC);
+      if (frag.cc === undefined) return;
+
+      if (playbackFirstCC === null) {
+        playbackFirstCC = frag.cc;
+        debug('Preroll skip: Playback started at cc =', playbackFirstCC);
       }
 
-      // When the continuity counter changes, we've crossed a discontinuity
-      // boundary — this marks the transition from preroll ad to live stream
-      if (firstFragCC !== null && frag.cc !== undefined && frag.cc !== firstFragCC) {
-        debug('Preroll skip: Discontinuity crossed, cc changed from', firstFragCC, 'to', frag.cc);
-        finishPrerollSkip(audioElement);
-      }
-    });
-
-    // Level loaded can reveal discontinuity tags in the playlist
-    hlsInstance.on(Hls.Events.LEVEL_LOADED, function onLevelLoaded(event, data) {
-      if (!prerollSkipState || !prerollSkipState.active) return;
-
-      const details = data.details;
-      if (details && details.fragments) {
-        // Check for discontinuity markers in the fragment list
-        let hasDiscontinuity = false;
-        for (let i = 1; i < details.fragments.length; i++) {
-          if (details.fragments[i].cc !== details.fragments[i - 1].cc) {
-            hasDiscontinuity = true;
-            debug('Preroll skip: Discontinuity found at fragment index', i,
-              'cc:', details.fragments[i - 1].cc, '->', details.fragments[i].cc);
-            break;
-          }
-        }
-        if (hasDiscontinuity) {
-          prerollSkipState.adFragmentsSeen = true;
-        }
+      // When cc changes during playback, we've crossed the preroll/live boundary
+      if (frag.cc !== playbackFirstCC) {
+        debug('Preroll skip: Live stream reached (cc:', playbackFirstCC, '->', frag.cc + ')');
+        finishPrerollSkip(audioElement, true);
       }
     });
   }
 
-  // Time-based approach: monitor playback position
-  // Works for both HLS.js and native HLS (Safari)
-  const timeCheckInterval = setInterval(() => {
-    if (!prerollSkipState || !prerollSkipState.active) {
-      clearInterval(timeCheckInterval);
-      return;
-    }
+  // === FALLBACK: Time-based mute ===
+  // For Safari native HLS (no HLS.js events) or if manifest detection fails,
+  // use a fixed duration. Also serves as ultimate safety net.
+  if (!hlsInstance) {
+    scheduleUnmute(audioElement, PREROLL_FALLBACK_DURATION);
+  } else {
+    // Even with HLS.js, set a generous fallback in case events don't fire
+    prerollSkipState.timeout = setTimeout(() => {
+      if (prerollSkipState && prerollSkipState.active) {
+        debug('Preroll skip: Fallback timeout, unmuting');
+        finishPrerollSkip(audioElement, true);
+      }
+    }, (PREROLL_FALLBACK_DURATION + 5) * 1000);
+  }
+
+  // Countdown timer update
+  prerollSkipState.interval = setInterval(() => {
+    if (!prerollSkipState || !prerollSkipState.active) return;
 
     const elapsed = (Date.now() - prerollSkipState.startTime) / 1000;
+    const target = prerollSkipState.prerollDuration || PREROLL_FALLBACK_DURATION;
+    const remaining = Math.max(0, target - elapsed);
+    updatePrerollCountdown(remaining);
 
-    // Update the countdown in the indicator
-    const remaining = Math.max(0, Math.ceil(PREROLL_MAX_DURATION - elapsed));
-    const countdownEl = document.getElementById('preroll-countdown');
-    if (countdownEl) {
-      countdownEl.textContent = remaining + 's';
-    }
-
-    // For native HLS (no fragment events), rely on time-based detection
-    if (!hlsInstance && elapsed >= PREROLL_MAX_DURATION) {
-      debug('Preroll skip: Time-based unmute (native HLS) at', elapsed.toFixed(1), 's');
-      clearInterval(timeCheckInterval);
-      finishPrerollSkip(audioElement);
+    if (remaining <= 0) {
+      clearInterval(prerollSkipState.interval);
     }
   }, 500);
-
-  // Fallback timeout: unmute after max preroll duration
-  prerollSkipState.timeout = setTimeout(() => {
-    if (prerollSkipState && prerollSkipState.active) {
-      debug('Preroll skip: Timeout reached, unmuting');
-      finishPrerollSkip(audioElement);
-    }
-  }, PREROLL_MAX_DURATION * 1000);
 }
 
-function finishPrerollSkip(audioElement) {
+function scheduleUnmute(audioElement, duration) {
+  if (!prerollSkipState || !prerollSkipState.active) return;
+
+  // Clear any existing timeout
+  if (prerollSkipState.timeout) clearTimeout(prerollSkipState.timeout);
+
+  const elapsed = (Date.now() - prerollSkipState.startTime) / 1000;
+  const remaining = Math.max(0, (duration - elapsed) * 1000);
+
+  debug('Preroll skip: Scheduling unmute in', (remaining / 1000).toFixed(1) + 's');
+
+  prerollSkipState.timeout = setTimeout(() => {
+    if (prerollSkipState && prerollSkipState.active) {
+      finishPrerollSkip(audioElement, true);
+    }
+  }, remaining);
+}
+
+function finishPrerollSkip(audioElement, hadPreroll) {
   if (!prerollSkipState) return;
 
-  debug('Preroll skip: Restoring volume');
   const userVolume = document.getElementById('volume-slider').value / 100;
   audioElement.volume = userVolume;
   prerollSkipState.active = false;
 
   hidePrerollSkipIndicator();
 
-  // Show a brief toast confirming the skip
-  showToast({
-    title: 'Ad Skipped',
-    message: 'Preroll advertisement skipped',
-    type: 'success',
-    duration: 2000
-  });
+  if (hadPreroll) {
+    const method = prerollSkipState.detectedViaManifest ? 'manifest' : 'fallback';
+    debug('Preroll skip: Complete (detected via', method + ')');
+    showToast({
+      title: 'Ad Skipped',
+      message: 'Preroll advertisement skipped',
+      type: 'success',
+      duration: 2000
+    });
+  } else {
+    debug('Preroll skip: No preroll detected, playing normally');
+  }
 
   cleanupPrerollSkip();
-}
-
-function getHostFromUrl(url) {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
 }
 
 function setMediaSessionMetadata(title, artist) {
