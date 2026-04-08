@@ -342,12 +342,24 @@ function getRNZNewsURL(hoursBack = 0) {
   return `https://podcast.radionz.co.nz/news/${dateStr}-064.mp3`;
 }
 
+// Check if NZ is currently in daylight saving (NZDT).
+// NewstalkZB suffixes files with "D" during NZDT and "S" during NZST.
+function isNZDST() {
+  const jan = new Date(new Date().getFullYear(), 0, 1)
+    .toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', timeZoneName: 'short' });
+  const now = new Date()
+    .toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', timeZoneName: 'short' });
+  // January is summer (NZDT) in NZ; if current matches January's offset name, we're in NZDT.
+  return now.includes('NZDT');
+}
+
 // Generate NewstalkZB news URL
 function getZBNewsURL(hoursBack = 0) {
   const now = getNZDTTime();
   now.setHours(now.getHours() - hoursBack);
   const dateStr = formatZBDate(now);
-  return `https://weekondemand.newstalkzb.co.nz/WeekOnDemand/ZB/auckland/${dateStr}-D.mp3`;
+  const suffix = isNZDST() ? 'D' : 'S';
+  return `https://weekondemand.newstalkzb.co.nz/WeekOnDemand/ZB/auckland/${dateStr}-${suffix}.mp3`;
 }
 
 // Update news button time displays
