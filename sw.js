@@ -1,20 +1,21 @@
 // RadioLive Service Worker
 // Provides offline support and caching for PWA functionality
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `radiolive-${CACHE_VERSION}`;
-const OFFLINE_PAGE = '/index.html';
+const APP_ROOT = new URL('./', self.location.href);
+const OFFLINE_PAGE = new URL('index.html', APP_ROOT).toString();
 
 // Static assets to precache
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/style.css',
-  '/manifest.json',
-  '/apple-touch-icon.png',
-  '/favicon.png'
-];
+  './',
+  'index.html',
+  'app.js',
+  'style.css',
+  'manifest.json',
+  'apple-touch-icon.png',
+  'favicon.png'
+].map(path => new URL(path, APP_ROOT).toString());
 
 // Install event - precache all static assets
 self.addEventListener('install', (event) => {
@@ -63,25 +64,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Helper: Check if URL is an audio stream (never cache these)
-function isAudioStream(url) {
-  const streamHosts = [
-    'centova.geckohost.nz',           // 95bFM stream
-    'stream-ice.radionz.co.nz',       // RNZ National stream
-    'playerservices.streamtheworld.com', // NewstalkZB stream
-    'podcast.radionz.co.nz',          // RNZ news bulletins
-    'weekondemand.newstalkzb.co.nz',  // NewstalkZB news bulletins
-    'i.mjh.nz'                         // HLS streams (radio + TV)
-  ];
-  return streamHosts.some(host => url.hostname.includes(host));
-}
-
-// Helper: Check if URL is CORS proxy (never cache these)
-function isCorsProxy(url) {
-  return url.hostname.includes('api.allorigins.win');
-}
-
-// Network-first strategy for HTML documents
+// Network-first strategy for same-origin app resources
 async function networkFirstStrategy(request) {
   try {
     const response = await fetch(request);
@@ -102,38 +85,11 @@ async function networkFirstStrategy(request) {
       return cachedResponse;
     }
 
-    // Last resort: return offline page
-    return caches.match(OFFLINE_PAGE);
-  }
-}
-
-// Cache-first strategy for static assets
-async function cacheFirstStrategy(request) {
-  // Try cache first
-  const cachedResponse = await caches.match(request);
-  if (cachedResponse) {
-    return cachedResponse;
-  }
-
-  // Fetch from network if not in cache
-  try {
-    const response = await fetch(request);
-
-    // Cache successful responses
-    if (response.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      cache.put(request, response.clone());
-    }
-
-    return response;
-  } catch (error) {
-    console.error('[ServiceWorker] Cache-first fetch failed:', error.message);
-
-    // For document requests, return offline page
+    // Documents can fall back to the app shell. Other missing assets should
+    // remain failures rather than being served HTML with the wrong MIME type.
     if (request.destination === 'document') {
       return caches.match(OFFLINE_PAGE);
     }
-
     throw error;
   }
 }
@@ -143,24 +99,12 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Strategy 1: Never cache audio streams (live content, massive size)
-  if (isAudioStream(url)) {
-    event.respondWith(fetch(request));
+  // Cache APIs only support GET, and third-party resources have their own
+  // caching semantics. Let the browser handle both directly.
+  if (request.method !== 'GET' || url.origin !== self.location.origin) {
     return;
   }
 
-  // Strategy 2: Never cache CORS proxy requests (dynamic metadata)
-  if (isCorsProxy(url)) {
-    event.respondWith(fetch(request));
-    return;
-  }
-
-  // Strategy 3: Network-first for HTML documents (fresh content with offline fallback)
-  if (request.destination === 'document') {
-    event.respondWith(networkFirstStrategy(request));
-    return;
-  }
-
-  // Strategy 4: Cache-first for static assets (CSS, JS, images)
-  event.respondWith(cacheFirstStrategy(request));
+  // Keep app code fresh while retaining the cached app shell for offline use.
+  event.respondWith(networkFirstStrategy(request));
 });

@@ -6,6 +6,7 @@ let loadedBulletinTimes = {
   newstalkzb: null
 };
 let bfmNowPlayingInterval = null;
+let bfmMetadataController = null;
 let lastBfmTrackInfo = null;
 
 // Memory leak prevention: Track intervals and initialization state
@@ -13,6 +14,8 @@ let newsUpdateInterval = null;
 let isPlayerInitialized = false;
 let currentAudioListeners = [];
 let currentTestAudio = null;
+let currentTestAudioCleanup = null;
+let bulletinLoadRequestId = 0;
 let isScrubbing = false;
 let updateBulletinControlsState = null;
 let syncScrubUI = null;
@@ -54,40 +57,76 @@ function updateMediaSessionState() {
 function setupMediaSessionHandlers() {
   if (!('mediaSession' in navigator)) return;
 
-  navigator.mediaSession.setActionHandler('play', () => {
-    if (audio) {
-      audio.play();
-      updateMediaSessionState();
-    }
-  });
-  navigator.mediaSession.setActionHandler('pause', () => {
-    if (audio) {
+  const handlers = {
+    play: () => playCurrentAudio(true),
+    pause: () => {
+      if (audio) audio.pause();
+    },
+    stop: () => {
+      if (!audio) return;
       audio.pause();
-      updateMediaSessionState();
+      if (isFinite(audio.duration)) audio.currentTime = 0;
+    },
+    seekbackward: (details) => {
+      if (!audio || !isFinite(audio.duration)) return;
+      audio.currentTime = Math.max(0, (audio.currentTime || 0) - (details.seekOffset || 15));
+    },
+    seekforward: (details) => {
+      if (!audio || !isFinite(audio.duration)) return;
+      audio.currentTime = Math.min(audio.duration, (audio.currentTime || 0) + (details.seekOffset || 15));
+    },
+    seekto: (details) => {
+      if (!audio || !isFinite(audio.duration) || details.seekTime === undefined) return;
+      audio.currentTime = Math.min(audio.duration, Math.max(0, details.seekTime));
     }
-  });
-  navigator.mediaSession.setActionHandler('stop', () => {
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-      updateMediaSessionState();
-    }
-  });
+  };
 
-  navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-    if (!audio || !isFinite(audio.duration)) return;
-    const offset = details.seekOffset || 15;
-    audio.currentTime = Math.max(0, (audio.currentTime || 0) - offset);
+  Object.entries(handlers).forEach(([action, handler]) => {
+    try {
+      navigator.mediaSession.setActionHandler(action, handler);
+    } catch (error) {
+      debug(`Media Session action unsupported: ${action}`, error);
+    }
   });
-  navigator.mediaSession.setActionHandler('seekforward', (details) => {
-    if (!audio || !isFinite(audio.duration)) return;
-    const offset = details.seekOffset || 15;
-    audio.currentTime = Math.min(audio.duration, (audio.currentTime || 0) + offset);
-  });
-  navigator.mediaSession.setActionHandler('seekto', (details) => {
-    if (!audio || !isFinite(audio.duration) || details.seekTime === undefined) return;
-    audio.currentTime = Math.min(audio.duration, Math.max(0, details.seekTime));
-  });
+}
+
+async function playCurrentAudio(showBlockedNotice = false) {
+  const targetAudio = audio;
+  if (!targetAudio) return false;
+
+  try {
+    await targetAudio.play();
+    return targetAudio === audio && !targetAudio.paused;
+  } catch (error) {
+    if (targetAudio !== audio) return false;
+    updatePlaybackUI(false);
+    updateMediaSessionState();
+    if (showBlockedNotice && error.name === 'NotAllowedError') {
+      showToast({
+        title: 'Tap Play to Start',
+        message: 'Your browser blocked automatic playback.',
+        type: 'info',
+        duration: 5000
+      });
+    } else if (error.name !== 'AbortError') {
+      console.error('Playback failed:', error);
+    }
+    return false;
+  }
+}
+
+function updatePlaybackUI(isPlaying) {
+  const playIcon = document.querySelector('.play-icon');
+  const pauseIcon = document.querySelector('.pause-icon');
+  const playPauseBtn = document.getElementById('play-pause-btn');
+  const onAirIndicator = document.getElementById('on-air-indicator');
+  const onAirText = document.querySelector('.on-air-text');
+
+  if (playIcon) playIcon.style.display = isPlaying ? 'none' : 'inline';
+  if (pauseIcon) pauseIcon.style.display = isPlaying ? 'inline' : 'none';
+  if (playPauseBtn) playPauseBtn.classList.toggle('playing', isPlaying);
+  if (onAirIndicator) onAirIndicator.classList.toggle('live', isPlaying);
+  if (onAirText) onAirText.textContent = isPlaying ? 'ON AIR' : 'OFF AIR';
 }
 
 function isBulletinUrl(url) {
@@ -117,6 +156,8 @@ let toastQueue = [];
 let activeToasts = 0;
 const MAX_TOASTS = 3;
 let bfmMetadataFailures = 0;
+let offlineToast = null;
+let wasOffline = false;
 
 function showToast(options) {
   const {
@@ -166,7 +207,7 @@ function showToast(options) {
   // Add to queue if too many toasts
   if (activeToasts >= MAX_TOASTS) {
     toastQueue.push({ toast, duration });
-    return;
+    return toast;
   }
 
   // Show toast
@@ -182,6 +223,8 @@ function showToast(options) {
       }, duration);
     }
   }
+
+  return toast;
 }
 
 function attachToastSwipeHandlers(toast) {
@@ -226,6 +269,15 @@ function attachToastSwipeHandlers(toast) {
 }
 
 function removeToast(toast) {
+  if (!toast || toast.classList.contains('toast-out')) return;
+  if (toast === offlineToast) offlineToast = null;
+
+  const queuedIndex = toastQueue.findIndex(item => item.toast === toast);
+  if (queuedIndex !== -1) {
+    toastQueue.splice(queuedIndex, 1);
+    return;
+  }
+
   toast.classList.add('toast-out');
   setTimeout(() => {
     if (toast.parentNode) {
@@ -291,7 +343,7 @@ function getNZDTTime() {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false
+    hourCycle: 'h23'
   });
 
   const parts = formatter.formatToParts(now);
@@ -345,12 +397,33 @@ function getRNZNewsURL(hoursBack = 0) {
 // Check if NZ is currently in daylight saving (NZDT).
 // NewstalkZB suffixes files with "D" during NZDT and "S" during NZST.
 function isNZDST() {
-  const jan = new Date(new Date().getFullYear(), 0, 1)
-    .toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', timeZoneName: 'short' });
-  const now = new Date()
-    .toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', timeZoneName: 'short' });
-  // January is summer (NZDT) in NZ; if current matches January's offset name, we're in NZDT.
-  return now.includes('NZDT');
+  const now = new Date();
+  const year = now.getUTCFullYear();
+
+  function offsetMinutes(date) {
+    const parts = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      timeZoneName: 'longOffset'
+    }).formatToParts(date);
+    const value = parts.find(part => part.type === 'timeZoneName')?.value || '';
+    const match = value.match(/GMT([+-])(\d{2}):?(\d{2})?/);
+    if (!match) return null;
+    const minutes = Number(match[2]) * 60 + Number(match[3] || 0);
+    return match[1] === '-' ? -minutes : minutes;
+  }
+
+  const currentOffset = offsetMinutes(now);
+  const januaryOffset = offsetMinutes(new Date(Date.UTC(year, 0, 1)));
+  const julyOffset = offsetMinutes(new Date(Date.UTC(year, 6, 1)));
+  if (currentOffset === null || januaryOffset === null || julyOffset === null) {
+    // Compatibility fallback for browsers without longOffset support.
+    const zoneName = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      timeZoneName: 'short'
+    }).format(now);
+    return zoneName.includes('NZDT') || zoneName.includes('GMT+13');
+  }
+  return currentOffset > Math.min(januaryOffset, julyOffset);
 }
 
 // Generate NewstalkZB news URL
@@ -386,12 +459,24 @@ function updateNewsButtonTimes() {
   }
 }
 
+function cancelBulletinProbe() {
+  bulletinLoadRequestId++;
+  if (currentTestAudioCleanup) {
+    currentTestAudioCleanup();
+    currentTestAudioCleanup = null;
+  }
+  currentTestAudio = null;
+}
+
 // Load news bulletin with fallback
 function loadNewsBulletin(type, name) {
+  cancelBulletinProbe();
+  const requestId = bulletinLoadRequestId;
   // Start with current hour
   let hoursBack = 0;
 
   function tryLoadBulletin(attemptHoursBack) {
+    if (requestId !== bulletinLoadRequestId) return;
     const url = type === 'rnz' ? getRNZNewsURL(attemptHoursBack) : getZBNewsURL(attemptHoursBack);
 
     const now = getNZDTTime();
@@ -400,18 +485,25 @@ function loadNewsBulletin(type, name) {
 
     debug(`Trying to load ${name} bulletin for ${hour}:00 from ${url}`);
 
-    // Clean up previous test audio if exists
-    if (currentTestAudio) {
-      currentTestAudio.pause();
-      currentTestAudio.src = '';
-      currentTestAudio = null;
-    }
-
     // Create temporary audio to test
     currentTestAudio = new Audio(url);
     const testAudio = currentTestAudio;
 
+    const cleanupTestAudio = () => {
+      testAudio.removeEventListener('canplay', canplayHandler);
+      testAudio.removeEventListener('error', errorHandler);
+      testAudio.pause();
+      testAudio.removeAttribute('src');
+      testAudio.load();
+      if (currentTestAudio === testAudio) currentTestAudio = null;
+      if (currentTestAudioCleanup === cleanupTestAudio) currentTestAudioCleanup = null;
+    };
+
     const canplayHandler = () => {
+      if (requestId !== bulletinLoadRequestId) {
+        cleanupTestAudio();
+        return;
+      }
       console.log(`Successfully loaded ${name} ${hour}:00 bulletin`);
 
       // Update the button label to match the actual bulletin hour
@@ -427,30 +519,26 @@ function loadNewsBulletin(type, name) {
       nowPlayingElem.childNodes[0].textContent = `Playing: ${name} ${hour}:00 News`;
       document.getElementById('play-pause-btn').disabled = false;
 
-      // Clean up test audio after successful load
-      testAudio.removeEventListener('canplay', canplayHandler);
-      testAudio.removeEventListener('error', errorHandler);
-      currentTestAudio = null;
+      cleanupTestAudio();
     };
 
     const errorHandler = (e) => {
+      if (requestId !== bulletinLoadRequestId) {
+        cleanupTestAudio();
+        return;
+      }
       console.error(`Failed to load ${name} ${hour}:00 bulletin, error:`, e);
 
       // Clean up this test audio
-      testAudio.removeEventListener('canplay', canplayHandler);
-      testAudio.removeEventListener('error', errorHandler);
-      testAudio.pause();
-      testAudio.src = '';
+      cleanupTestAudio();
 
       // Try previous hour if this is first attempt
       if (attemptHoursBack === 0) {
         console.log(`Falling back to previous hour`);
-        currentTestAudio = null;
         tryLoadBulletin(1);
       } else {
         // Both failed, just try to load anyway
         console.error(`Both attempts failed for ${name} news`);
-        currentTestAudio = null;
         loadStation(url, `${name} News`);
         const nowPlayingElem = document.getElementById('now-playing');
         nowPlayingElem.childNodes[0].textContent = `Trying to load ${name} News...`;
@@ -468,6 +556,7 @@ function loadNewsBulletin(type, name) {
 
     testAudio.addEventListener('canplay', canplayHandler);
     testAudio.addEventListener('error', errorHandler);
+    currentTestAudioCleanup = cleanupTestAudio;
   }
 
   tryLoadBulletin(hoursBack);
@@ -488,8 +577,6 @@ function initializePlayer() {
   const playPauseBtn = document.getElementById('play-pause-btn');
   const volumeSlider = document.getElementById('volume-slider');
   const nowPlaying = document.getElementById('now-playing');
-  const playIcon = document.querySelector('.play-icon');
-  const pauseIcon = document.querySelector('.pause-icon');
   const refreshBfmBtn = document.getElementById('refresh-bfm-btn');
   const bulletinControls = document.getElementById('bulletin-controls');
   const scrubSlider = document.getElementById('scrub-slider');
@@ -628,9 +715,9 @@ function initializePlayer() {
   stationButtons.forEach(button => {
     button.addEventListener('click', () => {
       if (isEditMode) return;
+      cancelBulletinProbe();
       const url = button.getAttribute('data-url');
       const name = button.getAttribute('data-name');
-      const isVideo = button.getAttribute('data-type') === 'video';
 
       // Update active state
       stationButtons.forEach(btn => btn.classList.remove('active'));
@@ -642,19 +729,8 @@ function initializePlayer() {
       loadedBulletinTimes.newstalkzb = null;
       updateNewsButtonTimes();
 
-      // Show one-time data usage notice for video streams
-      if (isVideo && !localStorage.getItem('tvDataWarningShown')) {
-        localStorage.setItem('tvDataWarningShown', '1');
-        showToast({
-          title: 'Data Usage',
-          message: 'TV audio streams use more data than radio stations.',
-          type: 'info',
-          duration: 4000
-        });
-      }
-
       // Load new station
-      loadStation(url, name, { isVideo });
+      loadStation(url, name);
       // Update text while preserving the button - use firstChild to get text node
       const textNode = nowPlaying.firstChild;
       if (textNode && textNode.nodeType === Node.TEXT_NODE) {
@@ -693,24 +769,11 @@ function initializePlayer() {
   playPauseBtn.addEventListener('click', () => {
     if (!audio) return;
 
-    const onAirIndicator = document.getElementById('on-air-indicator');
-    const onAirText = document.querySelector('.on-air-text');
-
     if (audio.paused) {
-      audio.play();
-      playIcon.style.display = 'none';
-      pauseIcon.style.display = 'inline';
-      playPauseBtn.classList.add('playing');
-      onAirIndicator.classList.add('live');
-      onAirText.textContent = 'ON AIR';
-      updateMediaSessionState();
+      playCurrentAudio(true);
     } else {
       audio.pause();
-      playIcon.style.display = 'inline';
-      pauseIcon.style.display = 'none';
-      playPauseBtn.classList.remove('playing');
-      onAirIndicator.classList.remove('live');
-      onAirText.textContent = 'OFF AIR';
+      updatePlaybackUI(false);
       updateMediaSessionState();
     }
   });
@@ -1058,7 +1121,7 @@ function hideLoading() {
 }
 
 // Load and play station
-function loadStation(url, name, options) {
+function loadStation(url, name) {
   // Show loading bar
   showLoading();
 
@@ -1078,9 +1141,10 @@ function loadStation(url, name, options) {
     audio = null;
   }
 
-  // Always use an Audio element — for HLS streams (e.g. TVNZ 1), use HLS.js
-  // so the browser plays audio-only and continues in the background on mobile.
+  // Always use an Audio element; HLS.js provides HLS playback in browsers
+  // without native support while preserving background audio behavior.
   audio = new Audio();
+  const stationAudio = audio;
   if (url.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
     // Chrome, Firefox, Edge — use HLS.js with lowest quality
     const hls = new Hls({ startLevel: 0 });
@@ -1090,33 +1154,35 @@ function loadStation(url, name, options) {
       hls.currentLevel = 0;
     });
     hls.on(Hls.Events.ERROR, (event, data) => {
-      if (data.fatal) {
-        audio.dispatchEvent(new Event('error'));
+      if (data.fatal && stationAudio === audio) {
+        stationAudio.dispatchEvent(new Event('error'));
       }
     });
-    audio._hlsInstance = hls;
+    stationAudio._hlsInstance = hls;
   } else {
     // Safari/iOS native HLS, or regular stream URLs
-    audio.src = url;
+    stationAudio.src = url;
   }
-  audio.volume = document.getElementById('volume-slider').value / 100;
+  stationAudio.volume = document.getElementById('volume-slider').value / 100;
   // Apply current playback speed to new audio
-  audio.playbackRate = currentSpeed || 1;
+  stationAudio.playbackRate = currentSpeed || 1;
 
   // Auto-play when loaded
+  let shouldAutoPlay = true;
   const canplayHandler = () => {
+    if (stationAudio !== audio || !shouldAutoPlay) return;
+    shouldAutoPlay = false;
     hideLoading();
-    audio.play();
-    document.querySelector('.play-icon').style.display = 'none';
-    document.querySelector('.pause-icon').style.display = 'inline';
-    document.getElementById('play-pause-btn').classList.add('playing');
-    updateMediaSessionState();
+    playCurrentAudio(true);
   };
-  audio.addEventListener('canplay', canplayHandler);
+  stationAudio.addEventListener('canplay', canplayHandler);
   currentAudioListeners.push({ event: 'canplay', handler: canplayHandler });
 
   // Handle errors
+  let hasShownStreamError = false;
   const errorHandler = (e) => {
+    if (stationAudio !== audio || hasShownStreamError) return;
+    hasShownStreamError = true;
     hideLoading();
     console.error('Audio error:', e);
     const nowPlayingElem = document.getElementById('now-playing');
@@ -1136,53 +1202,53 @@ function loadStation(url, name, options) {
       duration: 6000,
       action: {
         text: 'Retry',
-        callback: () => loadStation(url, name, options)
+        callback: () => loadStation(url, name)
       }
     });
 
-    const onAirIndicator = document.getElementById('on-air-indicator');
-    const onAirText = document.querySelector('.on-air-text');
-    onAirIndicator.classList.remove('live');
-    onAirText.textContent = 'OFF AIR';
+    updatePlaybackUI(false);
     updateMediaSessionState();
   };
-  audio.addEventListener('error', errorHandler);
+  stationAudio.addEventListener('error', errorHandler);
   currentAudioListeners.push({ event: 'error', handler: errorHandler });
 
   // Show loading state while waiting
   const waitingHandler = () => {
+    if (stationAudio !== audio) return;
     showLoading();
   };
-  audio.addEventListener('waiting', waitingHandler);
+  stationAudio.addEventListener('waiting', waitingHandler);
   currentAudioListeners.push({ event: 'waiting', handler: waitingHandler });
 
   // Hide loading when playing
   const playingHandler = () => {
+    if (stationAudio !== audio) return;
+    hasShownStreamError = false;
     hideLoading();
-    const onAirIndicator = document.getElementById('on-air-indicator');
-    const onAirText = document.querySelector('.on-air-text');
-    onAirIndicator.classList.add('live');
-    onAirText.textContent = 'ON AIR';
+    updatePlaybackUI(true);
     updateMediaSessionState();
   };
-  audio.addEventListener('playing', playingHandler);
+  stationAudio.addEventListener('playing', playingHandler);
   currentAudioListeners.push({ event: 'playing', handler: playingHandler });
+
+  const pauseHandler = () => {
+    if (stationAudio !== audio) return;
+    updatePlaybackUI(false);
+    updateMediaSessionState();
+  };
+  stationAudio.addEventListener('pause', pauseHandler);
+  currentAudioListeners.push({ event: 'pause', handler: pauseHandler });
 
   // Handle audio end (for bulletins)
   const endedHandler = () => {
-    const onAirIndicator = document.getElementById('on-air-indicator');
-    const onAirText = document.querySelector('.on-air-text');
-    onAirIndicator.classList.remove('live');
-    onAirText.textContent = 'OFF AIR';
-    document.querySelector('.play-icon').style.display = 'inline';
-    document.querySelector('.pause-icon').style.display = 'none';
-    document.getElementById('play-pause-btn').classList.remove('playing');
+    if (stationAudio !== audio) return;
+    updatePlaybackUI(false);
     updateMediaSessionState();
   };
-  audio.addEventListener('ended', endedHandler);
+  stationAudio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
-  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News'), isVideo: !!(options && options.isVideo) };
+  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News') };
   setMediaSessionMetadata(name, currentStation.isBulletin ? 'News Bulletin' : 'Live Radio');
   if (updateBulletinControlsState) {
     updateBulletinControlsState();
@@ -1190,27 +1256,30 @@ function loadStation(url, name, options) {
 
   // Update bulletin controls visibility on metadata/time changes
   const metadataHandler = () => {
+    if (stationAudio !== audio) return;
     if (updateBulletinControlsState) {
       updateBulletinControlsState();
     }
   };
-  audio.addEventListener('loadedmetadata', metadataHandler);
+  stationAudio.addEventListener('loadedmetadata', metadataHandler);
   currentAudioListeners.push({ event: 'loadedmetadata', handler: metadataHandler });
 
   const durationHandler = () => {
+    if (stationAudio !== audio) return;
     if (updateBulletinControlsState) {
       updateBulletinControlsState();
     }
   };
-  audio.addEventListener('durationchange', durationHandler);
+  stationAudio.addEventListener('durationchange', durationHandler);
   currentAudioListeners.push({ event: 'durationchange', handler: durationHandler });
 
   const timeUpdateHandler = () => {
+    if (stationAudio !== audio) return;
     if (syncScrubUI) {
       syncScrubUI();
     }
   };
-  audio.addEventListener('timeupdate', timeUpdateHandler);
+  stationAudio.addEventListener('timeupdate', timeUpdateHandler);
   currentAudioListeners.push({ event: 'timeupdate', handler: timeUpdateHandler });
 
   // Clear old 95bFM interval if it exists (prevent race condition)
@@ -1218,11 +1287,16 @@ function loadStation(url, name, options) {
     clearInterval(bfmNowPlayingInterval);
     bfmNowPlayingInterval = null;
   }
+  if (bfmMetadataController) {
+    bfmMetadataController.abort();
+    bfmMetadataController = null;
+  }
 
   // Start fetching 95bFM now playing if it's 95bFM
   const refreshBtn = document.getElementById('refresh-bfm-btn');
   if (name === '95bFM') {
     lastBfmTrackInfo = null; // Reset track info when starting 95bFM
+    bfmMetadataFailures = 0;
     fetch95bFMNowPlaying();
     // Update every 30 seconds
     bfmNowPlayingInterval = setInterval(fetch95bFMNowPlaying, 30000);
@@ -1243,6 +1317,7 @@ async function fetch95bFMNowPlaying() {
     return;
   }
 
+  let requestController = null;
   try {
     debug('Fetching 95bFM now playing...');
     // Use CORS proxy to fetch the page with longer timeout
@@ -1250,7 +1325,10 @@ async function fetch95bFMNowPlaying() {
     const targetUrl = encodeURIComponent('https://95bfm.com/');
 
     // Create abort controller with 20 second timeout for slow proxy
+    if (bfmMetadataController) bfmMetadataController.abort();
     const controller = new AbortController();
+    requestController = controller;
+    bfmMetadataController = controller;
     const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
@@ -1265,6 +1343,7 @@ async function fetch95bFMNowPlaying() {
       }
 
       const html = await response.text();
+      if (controller !== bfmMetadataController) return;
 
       // Parse the HTML to find the now playing track
       const parser = new DOMParser();
@@ -1317,17 +1396,14 @@ async function fetch95bFMNowPlaying() {
       throw fetchError; // Re-throw to outer catch
     }
   } catch (error) {
-    // Less verbose error logging - timeouts are common with CORS proxies
-    if (error.name === 'AbortError') {
-      console.warn('95bFM fetch timed out (proxy may be slow)');
-      bfmMetadataFailures++;
-    } else {
-      console.error('Error fetching 95bFM now playing:', error);
-      bfmMetadataFailures++;
-    }
+    if (requestController !== bfmMetadataController) return;
+    if (!currentStation || currentStation.name !== '95bFM') return;
+    bfmMetadataFailures++;
+    debug('95bFM metadata request failed:', error);
 
     // Show toast after 3 consecutive failures
     if (bfmMetadataFailures === 3) {
+      console.warn('95bFM metadata is temporarily unavailable.');
       showToast({
         title: '95bFM Metadata Unavailable',
         message: 'Unable to fetch track information. The metadata service may be down.',
@@ -1350,6 +1426,10 @@ async function fetch95bFMNowPlaying() {
         }
       }
     }
+  } finally {
+    if (requestController === bfmMetadataController) {
+      bfmMetadataController = null;
+    }
   }
 }
 
@@ -1363,9 +1443,12 @@ function updateOnlineStatus() {
     statusElement.classList.remove('offline');
     statusIndicator.style.backgroundColor = '#e8f5e9';
 
-    // Show back online notification if there were offline toasts
-    const container = document.getElementById('toast-container');
-    if (container && container.children.length > 0) {
+    if (offlineToast) {
+      removeToast(offlineToast);
+      offlineToast = null;
+    }
+
+    if (wasOffline) {
       showToast({
         title: 'Back Online',
         message: 'Internet connection restored.',
@@ -1374,23 +1457,28 @@ function updateOnlineStatus() {
         icon: '✅'
       });
     }
+    wasOffline = false;
   } else {
     statusElement.textContent = 'Offline - Streaming unavailable';
     statusElement.classList.add('offline');
     statusIndicator.style.backgroundColor = '#ffebee';
 
-    // Show offline notification
-    showToast({
-      title: 'No Internet Connection',
-      message: 'Streaming is unavailable while offline.',
-      type: 'error',
-      duration: 0, // Keep until dismissed or back online
-      icon: '📡'
-    });
+    wasOffline = true;
+    if (!offlineToast) {
+      offlineToast = showToast({
+        title: 'No Internet Connection',
+        message: 'Streaming is unavailable while offline.',
+        type: 'error',
+        duration: 0, // Keep until dismissed or back online
+        icon: '📡'
+      });
+    }
 
     // Pause audio when offline
     if (audio && !audio.paused) {
       audio.pause();
+      updatePlaybackUI(false);
+      updateMediaSessionState();
     }
   }
 }
@@ -1410,6 +1498,10 @@ window.addEventListener('beforeunload', () => {
     clearInterval(bfmNowPlayingInterval);
     bfmNowPlayingInterval = null;
   }
+  if (bfmMetadataController) {
+    bfmMetadataController.abort();
+    bfmMetadataController = null;
+  }
 
   // Clean up audio and its listeners
   if (audio) {
@@ -1428,9 +1520,7 @@ window.addEventListener('beforeunload', () => {
 
   // Clean up test audio
   if (currentTestAudio) {
-    currentTestAudio.pause();
-    currentTestAudio.src = '';
-    currentTestAudio = null;
+    cancelBulletinProbe();
   }
 });
 

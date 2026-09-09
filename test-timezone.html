@@ -32,7 +32,7 @@
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: false
+        hourCycle: 'h23'
       });
 
       const parts = formatter.formatToParts(now);
@@ -72,6 +72,27 @@
       return `${year}.${month}.${day}-${hour}.00.00`;
     }
 
+    function isNZDST() {
+      const formatter = new Intl.DateTimeFormat('en-NZ', {
+        timeZone: 'Pacific/Auckland',
+        timeZoneName: 'longOffset'
+      });
+      const getOffset = (date) => {
+        const value = formatter.formatToParts(date)
+          .find(part => part.type === 'timeZoneName')?.value || '';
+        const match = value.match(/GMT([+-])(\d{2}):?(\d{2})?/);
+        if (!match) return null;
+        const minutes = Number(match[2]) * 60 + Number(match[3] || 0);
+        return match[1] === '-' ? -minutes : minutes;
+      };
+      const now = new Date();
+      const year = now.getUTCFullYear();
+      const currentOffset = getOffset(now);
+      const januaryOffset = getOffset(new Date(Date.UTC(year, 0, 1)));
+      const julyOffset = getOffset(new Date(Date.UTC(year, 6, 1)));
+      return currentOffset > Math.min(januaryOffset, julyOffset);
+    }
+
     const results = document.getElementById('results');
 
     // Test 1: Show current local time
@@ -109,7 +130,7 @@
 
     // Test 3: Show what URLs would be generated
     const rnzUrl = `https://podcast.radionz.co.nz/news/${formatRNZDate(nzTime)}-064.mp3`;
-    const zbUrl = `https://weekondemand.newstalkzb.co.nz/WeekOnDemand/ZB/auckland/${formatZBDate(nzTime)}-D.mp3`;
+    const zbUrl = `https://weekondemand.newstalkzb.co.nz/WeekOnDemand/ZB/auckland/${formatZBDate(nzTime)}-${isNZDST() ? 'D' : 'S'}.mp3`;
 
     results.innerHTML += `
       <div class="test-result pass">

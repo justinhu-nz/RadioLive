@@ -4,7 +4,7 @@ A lightweight Progressive Web App for streaming New Zealand radio stations. Buil
 
 ## Features
 
-- Stream 8 NZ radio stations: 95bFM, ZM, The Edge, George FM, The Breeze, Channel X, RNZ National, and NewstalkZB
+- Stream 9 New Zealand radio services, including 95bFM, RNZ National, and Radio One
 - On-demand news bulletins with timezone-aware URL generation
 - Live track metadata for 95bFM
 - Offline PWA capabilities with service worker caching
