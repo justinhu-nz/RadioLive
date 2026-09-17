@@ -129,20 +129,6 @@ function updatePlaybackUI(isPlaying) {
   if (onAirText) onAirText.textContent = isPlaying ? 'ON AIR' : 'OFF AIR';
 }
 
-function isBulletinUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const isMp3 = parsed.pathname.endsWith('.mp3');
-    const isKnownHost = [
-      'podcast.radionz.co.nz',
-      'weekondemand.newstalkzb.co.nz'
-    ].some(host => parsed.hostname.includes(host));
-    return isMp3 || isKnownHost;
-  } catch (e) {
-    return false;
-  }
-}
-
 function formatTime(seconds) {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
   const totalSeconds = Math.floor(seconds);
@@ -514,7 +500,7 @@ function loadNewsBulletin(type, name) {
       loadedBulletinTimes[type] = hour;
       debug(`Stored bulletin time for ${type}: ${hour}`);
 
-      loadStation(url, `${name} ${hour}:00 News`);
+      loadStation(url, `${name} ${hour}:00 News`, { isBulletin: true });
       const nowPlayingElem = document.getElementById('now-playing');
       nowPlayingElem.childNodes[0].textContent = `Playing: ${name} ${hour}:00 News`;
       document.getElementById('play-pause-btn').disabled = false;
@@ -539,7 +525,7 @@ function loadNewsBulletin(type, name) {
       } else {
         // Both failed, just try to load anyway
         console.error(`Both attempts failed for ${name} news`);
-        loadStation(url, `${name} News`);
+        loadStation(url, `${name} News`, { isBulletin: true });
         const nowPlayingElem = document.getElementById('now-playing');
         nowPlayingElem.childNodes[0].textContent = `Trying to load ${name} News...`;
         document.getElementById('play-pause-btn').disabled = false;
@@ -1121,7 +1107,7 @@ function hideLoading() {
 }
 
 // Load and play station
-function loadStation(url, name) {
+function loadStation(url, name, { isBulletin = false } = {}) {
   // Show loading bar
   showLoading();
 
@@ -1202,7 +1188,7 @@ function loadStation(url, name) {
       duration: 6000,
       action: {
         text: 'Retry',
-        callback: () => loadStation(url, name)
+        callback: () => loadStation(url, name, { isBulletin })
       }
     });
 
@@ -1248,7 +1234,7 @@ function loadStation(url, name) {
   stationAudio.addEventListener('ended', endedHandler);
   currentAudioListeners.push({ event: 'ended', handler: endedHandler });
 
-  currentStation = { url, name, isBulletin: isBulletinUrl(url) || name.includes('News') };
+  currentStation = { url, name, isBulletin };
   setMediaSessionMetadata(name, currentStation.isBulletin ? 'News Bulletin' : 'Live Radio');
   if (updateBulletinControlsState) {
     updateBulletinControlsState();

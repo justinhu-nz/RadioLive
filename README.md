@@ -46,7 +46,8 @@ This app includes a minimal, non-intrusive scrub interface that appears only for
 - Skip buttons jump `±15s` and clamp to valid range.
 
 ### Key Entry Points
-- `isBulletinUrl(url)` determines if the source is a bulletin.
+- Bulletin loads explicitly identify their source as recorded audio, so similarly
+  named live stations such as Newstalk ZB are not treated as bulletins.
 - `updateBulletinControlsState` toggles visibility + disabled states.
 - `syncScrubUI` updates slider and time labels.
 - `loadStation()` attaches audio listeners for timing updates.
