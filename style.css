@@ -569,9 +569,10 @@ body.reordering {
     border-top: none;
 }
 
-.news-section h3 {
+.news-section h3,
+.stations-heading {
     color: #333;
-    margin-bottom: 10px;
+    margin: 0 0 10px;
     text-align: left;
     font-size: 0.85rem;
     font-weight: 600;
@@ -582,7 +583,7 @@ body.reordering {
 
 .news-buttons {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 1px;
     margin-bottom: 12px;
     background: #888;
@@ -592,9 +593,10 @@ body.reordering {
 }
 
 .news-btn {
+    flex: 1 1 0;
+    min-width: 0;
     background: linear-gradient(180deg, #fefefe 0%, #e8e8e8 100%);
     border: none;
-    border-bottom: 1px solid #c8c8c8;
     border-radius: 0;
     padding: 10px 12px;
     color: #1a1a1a;

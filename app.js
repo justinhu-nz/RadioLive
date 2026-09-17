@@ -129,6 +129,46 @@ function updatePlaybackUI(isPlaying) {
   if (onAirText) onAirText.textContent = isPlaying ? 'ON AIR' : 'OFF AIR';
 }
 
+function setNowPlayingText(text) {
+  const nowPlaying = document.getElementById('now-playing');
+  if (!nowPlaying) return;
+  const textNode = nowPlaying.firstChild;
+  if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+    textNode.textContent = text;
+  } else if (nowPlaying.childNodes[0]) {
+    nowPlaying.childNodes[0].textContent = text;
+  }
+}
+
+function getHlsTrackInfo(rawTitle, stationName) {
+  const rawValue = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+  if (!rawValue || rawValue.length > 500) return null;
+
+  // StreamGuys encodes metadata as EXTINF attributes, for example
+  // title="Artist - Track",artist="Artist - Track". HLS.js exposes the
+  // complete value as frag.title, so extract the title attribute first.
+  const titleAttribute = rawValue.match(/(?:^|,)\s*title="([^"]+)"/i);
+  const title = (titleAttribute ? titleAttribute[1] : rawValue).trim();
+  if (!title || title.length > 200) return null;
+
+  const separatorIndex = title.indexOf(' - ');
+  if (separatorIndex <= 0 || separatorIndex >= title.length - 3) return null;
+
+  const artist = title.slice(0, separatorIndex).trim();
+  const track = title.slice(separatorIndex + 3).trim();
+  if (!artist || !track) return null;
+
+  // Stream playlists also use EXTINF titles for station slogans. Do not
+  // present those as songs (for example, "ZM Auckland - Hit Music...").
+  const compactArtist = artist.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const compactStation = stationName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (compactArtist.startsWith(compactStation) || compactStation.startsWith(compactArtist)) {
+    return null;
+  }
+
+  return `${artist} - ${track}`;
+}
+
 function formatTime(seconds) {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
   const totalSeconds = Math.floor(seconds);
@@ -1138,6 +1178,17 @@ function loadStation(url, name, { isBulletin = false } = {}) {
     hls.attachMedia(audio);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       hls.currentLevel = 0;
+    });
+    hls.on(Hls.Events.FRAG_CHANGED, (event, data) => {
+      if (stationAudio !== audio || isBulletin) return;
+      const trackInfo = getHlsTrackInfo(data.frag?.title, name);
+      if (trackInfo) {
+        setNowPlayingText(`Now Playing: ${trackInfo}`);
+        setMediaSessionMetadata(trackInfo, name);
+      } else {
+        setNowPlayingText(`Now Playing: ${name}`);
+        setMediaSessionMetadata(name, 'Live Radio');
+      }
     });
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (data.fatal && stationAudio === audio) {

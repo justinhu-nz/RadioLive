@@ -6,7 +6,7 @@ A lightweight Progressive Web App for streaming New Zealand radio stations. Buil
 
 - Stream 9 New Zealand radio services, including 95bFM, RNZ National, and Radio One
 - On-demand news bulletins with timezone-aware URL generation
-- Live track metadata for 95bFM
+- Live track metadata for 95bFM and HLS stations that publish track titles
 - Offline PWA capabilities with service worker caching
 - Toast notification system for error handling
 - Network status monitoring
@@ -39,7 +39,7 @@ This app includes a minimal, non-intrusive scrub interface that appears only for
 - Controls are compact to preserve the original look.
 
 **JavaScript**
-- `app.js` detects bulletins using `isBulletinUrl()` and `name.includes('News')`.
+- Bulletin status is passed explicitly when recorded news is loaded.
 - It tracks audio duration and current time via `loadedmetadata`, `durationchange`, and `timeupdate`.
 - When a bulletin is loaded and seekable, it toggles the scrub UI and updates labels.
 - Slider input updates `audio.currentTime` for fine scrubbing.
